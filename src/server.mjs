@@ -204,7 +204,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/') {
     const html = readPage();
-    const pageCfg = { wakeWord: cfg.wakeWord, wakeAliases: cfg.wakeAliases, wakeReplies: cfg.wakeReplies, speechPauseMs: cfg.speechPauseMs, speechLang: cfg.speechLang, bargeIn: cfg.bargeIn, voice: cfg.voice, honorific: cfg.honorific, localVoice: cfg.tts !== 'browser' && ttsAvailable(), uiHash: pageHash(html) };
+    const pageCfg = { wakeWord: cfg.wakeWord, wakeAliases: cfg.wakeAliases, wakeReplies: cfg.wakeReplies, speechPauseMs: cfg.speechPauseMs, speechLang: cfg.speechLang, bargeIn: cfg.bargeIn, voice: cfg.voice, honorific: cfg.honorific, conversationSeconds: cfg.conversationSeconds, localVoice: cfg.tts !== 'browser' && ttsAvailable(), uiHash: pageHash(html) };
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end(html.replace('/*CONFIG*/', () => JSON.stringify(pageCfg)));
   }

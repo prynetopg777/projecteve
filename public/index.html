@@ -449,12 +449,28 @@ const log = $('log');
 // ---------- UI helpers ----------
 let busy = false, speaking = false, listening = false, offline = false, reportedState = null;
 const perms = new Map(); // pending permission id -> card element
+
+// ---------- Conversation mode ----------
+// After Eve speaks, the mic stays open for a while with no wake word needed, like talking to a person.
+// It ends after CONVO_MS of silence, or when you say "that's all" / "thanks".
+const CONVO_MS = (CFG.conversationSeconds || 30) * 1000;
+let convoUntil = 0, convoTimer = null, convoEnding = false;
+const convoOpen = () => convoUntil > Date.now();
+function convoRearm(ms = CONVO_MS) {
+  if (!wakeMode) return;
+  convoUntil = Date.now() + ms;
+  clearTimeout(convoTimer);
+  convoTimer = setTimeout(render, ms + 100);
+  render();
+}
+const END_CONVO = /^(?:(?:ok(?:ay)?|alright|all right|cool|great|nice)[,.\s]+)?(?:that'?s (?:all|it)(?: for now)?|thanks?(?: you| a lot| so much)?|thank you(?: so much| very much)?|goodbye|bye(?: now)?|good ?night|go to sleep|i'?m (?:good|done)|salamat(?: po)?|sige na)(?:[,.\s]+(?:eve|sir))*\W*$/i;
+const SHORT_OK = /^(?:yes|yeah|yep|no|nope|okay|ok|sure|go|continue|more|repeat|again|oo|hindi|sige)\W*$/i;
 function render() {
   const base = speaking ? 'speaking' : listening ? 'listening' : busy ? 'thinking' : 'idle';
   const state = offline ? 'offline' : perms.size ? 'permission' : base;
   document.body.dataset.state = state;
   fx.listen(base === 'listening');
-  $('state').textContent = { idle: wakeMode ? `say "${CFG.wakeWord}"` : 'standby', listening: 'listening', thinking: 'processing', speaking: 'speaking', permission: 'awaiting your ok', offline: 'reconnecting' }[state];
+  $('state').textContent = { idle: wakeMode ? (convoOpen() ? 'listening for you' : `say "${CFG.wakeWord}"`) : 'standby', listening: 'listening', thinking: 'processing', speaking: 'speaking', permission: 'awaiting your ok', offline: 'reconnecting' }[state];
   // Tell the server (and through it, the desktop overlay) what we're doing.
   if (base !== reportedState) { reportedState = base; postJson('/api/ui-state', { state: base }).catch(() => {}); }
 }
@@ -522,7 +538,7 @@ function isEcho(text) {
 }
 function say(text, onEnd) {
   text = text.trim();
-  if (!voiceOn || !text) return onEnd?.();
+  if (!voiceOn || !/[a-z0-9]/i.test(text)) return onEnd?.(); // nothing speakable, e.g. a bare "..."
   recentSpeech.push({ text: normWords(text), until: Date.now() + 8000 + text.length * 80 });
   if (CFG.localVoice && !isFilipino(text)) return sayLocal(text, onEnd);
   sayBrowser(text, onEnd);
@@ -543,7 +559,7 @@ async function playNext() {
   if (!it) { ttsPlaying = false; return; }
   ttsPlaying = true;
   const finish = () => {
-    if (--ttsPending <= 0) { ttsPending = 0; speaking = false; render(); resumeRecognition(); }
+    if (--ttsPending <= 0) { ttsPending = 0; speaking = false; if (!busy && !convoEnding) convoRearm(); render(); resumeRecognition(); }
     it.onEnd?.();
     playNext();
   };
@@ -564,7 +580,7 @@ function sayBrowser(text, onEnd) {
   ttsPending++;
   speaking = true; pauseRecognition(); render();
   u.onend = u.onerror = () => {
-    if (--ttsPending <= 0) { ttsPending = 0; speaking = false; render(); resumeRecognition(); }
+    if (--ttsPending <= 0) { ttsPending = 0; speaking = false; if (!busy && !convoEnding) convoRearm(); render(); resumeRecognition(); }
     onEnd?.();
   };
   speechSynthesis.speak(u);
@@ -599,6 +615,7 @@ function onDelta(text) {
 function onDone() {
   if (replyEl) say(speakable(replyText).slice(spokenLen));
   replyEl = null;
+  if (!speaking && !busy) convoRearm(); // nothing left to say: the conversation window starts now
 }
 
 // ---------- Server connection ----------
@@ -718,6 +735,7 @@ async function send(text) {
   if (answerByVoice(text)) return;
   shutUp();
   lastSent = text;
+  convoRearm(10 * 60000); // stays open while she works; re-armed to 30s once she finishes speaking
   addMsg('user', text);
   // A new request while Eve is still working replaces the old one instead of queueing behind it.
   const interrupt = busy;
@@ -867,9 +885,28 @@ function handleFinal(text) {
   if (stopRe.test(text) && (busy || speaking)) { stopAll(); return; }
   if (awaitingCommand > Date.now()) { awaitingCommand = 0; listening = false; render(); send(text); return; }
   const m = text.match(wakeRe);
+  if (convoOpen()) {
+    // In a conversation no wake word is needed. Her name may still lead the sentence.
+    const lead = m ? text.slice(0, m.index).split(/\s+/).filter(Boolean).length <= 1 : false;
+    const body = (m && lead ? m[1] : text).trim();
+    if (!body) return acknowledgeWake();
+    if (stopRe.test(text)) { convoUntil = 0; render(); return; }
+    if (END_CONVO.test(body)) return endConvo();
+    if (body.split(/\s+/).length < 2 && !SHORT_OK.test(body)) return; // stray word: TV, cough, background
+    return send(body);
+  }
   if (!m) return;
   if (m[1].trim()) send(m[1]);
   else acknowledgeWake();
+}
+
+function endConvo() {
+  convoUntil = 0;
+  const bye = ['Anytime, {honorific}.', "You're welcome, {honorific}.", 'Just call if you need me.'].map((r) => r.replaceAll('{honorific}', CFG.honorific));
+  const reply = bye[Math.floor(Math.random() * bye.length)];
+  addMsg('eve', reply);
+  convoEnding = true;
+  say(reply, () => { convoEnding = false; convoUntil = 0; render(); });
 }
 
 // Just "Hey Eve": answer out loud right away (no round trip to Claude), then listen for the request.
