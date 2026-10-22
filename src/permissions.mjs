@@ -98,15 +98,30 @@ const inside = (file, dir) => {
   return rel && !rel.startsWith('..') && !path.isAbsolute(rel);
 };
 
-/** Actions that must be confirmed individually even during an approved task. */
-export function alwaysAsk(tool, input = {}) {
+// Protected files the user can unlock by approving a plan that names them. The state files
+// (settings.json, task.json) are never unlockable: they hold auto mode and the approval itself.
+const PLAN_UNLOCKABLE = ['src/permissions.mjs', 'config.json'].map((f) => path.join(ROOT, f));
+const planNames = (file, plan) => {
+  const rel = path.relative(ROOT, file).replaceAll('\\', '/').toLowerCase();
+  const p = String(plan || '').toLowerCase().replaceAll('\\', '/');
+  return p.includes(rel) || p.includes(path.basename(rel));
+};
+
+/** Actions that must be confirmed individually, unless the approved plan names the file. */
+export function alwaysAsk(tool, input = {}, plan = '') {
   if (SHELLS.has(tool)) {
-    const cmd = String(input.command || '');
+    let cmd = String(input.command || '');
     if (autoModeRequest(tool, input) === 'on') return true; // Eve can't put herself into auto mode
     if (autoModeRequest(tool, input)) return false; // `auto off` / `auto status` are always fine
-    return ALWAYS_ASK.test(cmd) || (PROTECTED_SHELL.test(cmd) && !isReadOnly(cmd));
+    if (ALWAYS_ASK.test(cmd)) return true;
+    if (planNames(path.join(ROOT, 'src/permissions.mjs'), plan)) cmd = cmd.replace(/permissions\.mjs/gi, '');
+    return PROTECTED_SHELL.test(cmd) && !isReadOnly(cmd);
   }
-  if (FILE_TOOLS.has(tool)) return PROTECTED_FILES.includes(path.resolve(WORKSPACE, input.file_path || ''));
+  if (FILE_TOOLS.has(tool)) {
+    const file = path.resolve(WORKSPACE, input.file_path || '');
+    if (!PROTECTED_FILES.includes(file)) return false;
+    return !(PLAN_UNLOCKABLE.includes(file) && planNames(file, plan));
+  }
   return false;
 }
 
@@ -120,9 +135,9 @@ export function grantKey(tool, input = {}) {
 /**
  * @param {{ grants?: Set<string>, taskActive?: boolean }} ctx
  */
-export function isAutoAllowed(tool, input = {}, { grants = new Set(), taskActive = false } = {}) {
+export function isAutoAllowed(tool, input = {}, { grants = new Set(), taskActive = false, taskPlan = '' } = {}) {
   if (taskRequest(tool, input)) return false; // the task request itself is always shown
-  if (alwaysAsk(tool, input)) return false;
+  if (alwaysAsk(tool, input, taskPlan)) return false;
   if (autoModeRequest(tool, input)) return true; // `auto off` / `status` (`auto on` was caught above)
   if (taskActive) return true;
   if (grants.has(grantKey(tool, input))) return true;

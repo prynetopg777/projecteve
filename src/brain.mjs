@@ -331,7 +331,7 @@ export class Brain extends EventEmitter {
     }
     const { tool_name: tool, input, description } = request;
     if (isTaskDone(tool, input)) this.endTask('done');
-    if (isAutoAllowed(tool, input, { grants: this.grants, taskActive: this.autoMode || this.taskActive })) {
+    if (isAutoAllowed(tool, input, { grants: this.grants, taskActive: this.autoMode || this.taskActive, taskPlan: this.task?.plan })) {
       this.pending.set(id, { req: {}, input });
       return this.respond(id, 'allow');
     }
