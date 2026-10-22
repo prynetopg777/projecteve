@@ -734,7 +734,28 @@ function stopAll() { shutUp(); post('/api/stop'); replyEl = null; }
 // ---------- Speech recognition ----------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, wakeMode = false, pushToTalk = false, awaitingCommand = 0, paused = false;
-const wakeNames = [CFG.wakeWord, ...(CFG.wakeAliases || [])].join('|');
+// Extra ways the recognizer mishears "Eve" (especially with the Filipino model).
+const EXTRA_ALIASES = ['eeve', 'evi', 'ebi', 'ibi', 'ava', 'iva', 'evo', 'ebby', 'eevee'];
+const wakeList = [...new Set([CFG.wakeWord, ...(CFG.wakeAliases || []), ...EXTRA_ALIASES].map((w) => w.toLowerCase()))];
+const wakeNames = wakeList.join('|');
+// Real words that look like the wake word; never treated as a mishearing.
+const NOT_WAKE = new Set(['even', 'ever', 'eye', 'eyes', 'ewe', 'aye', 'ave', 'abe', 'eli', 'eat', 'ate', 'eve\'s', 'evil', 'ivy']);
+const lev = (a, b) => {
+  const d = [...Array(b.length + 1).keys()];
+  for (let i = 1; i <= a.length; i++) {
+    let p = d[0]; d[0] = i;
+    for (let j = 1; j <= b.length; j++) { const t = d[j]; d[j] = Math.min(d[j] + 1, d[j - 1] + 1, p + (a[i - 1] === b[j - 1] ? 0 : 1)); p = t; }
+  }
+  return d[b.length];
+};
+// First word of an utterance (or the one after "hey") that is one letter off a wake name becomes the wake word.
+function fuzzyWake(text) {
+  const m = text.match(/^((?:hey|ok|okay|uy|hoy)[\s,]+)?([a-z']+)([\s\S]*)$/i);
+  if (!m) return text;
+  const w = m[2].toLowerCase().replace(/'/g, '');
+  if (w.length < 2 || w.length > 5 || NOT_WAKE.has(w) || wakeList.includes(w)) return text;
+  return wakeList.some((n) => n.length >= 3 && Math.abs(n.length - w.length) <= 1 && lev(w, n) <= 1) ? (m[1] || '') + CFG.wakeWord + m[3] : text;
+}
 const wakeRe = new RegExp(`\\b(?:hey |ok |okay |uy |hoy )?(?:${wakeNames})\\b[\\s,.!?]*(.*)`, 'i');
 // English and Filipino stop words: "stop", "tama na", "tigil"…
 const STOP_WORDS = 'stop|cancel|never ?mind|shut up|be quiet|tama na|tigil|hinto|(?:hu)?wag na|ayoko na';
@@ -750,6 +771,8 @@ function startRec() {
   r.lang = CFG.speechLang || navigator.language || 'en-US'; // fil-PH also understands English and Taglish
   r.continuous = true; // push-to-talk too: the silence timer decides when you're done, not the browser
   r.interimResults = true;
+  r.maxAlternatives = 3; // lets us pick the guess that contains the wake word
+  r.t0 = Date.now();
   r.onstart = () => {
     listening = r.ptt || awaitingCommand > Date.now(); render();
     if (r.ptt) setTimeout(() => { if (rec === r && !heard && !heardInterim) r.stop(); }, 8000); // nothing said
@@ -758,8 +781,12 @@ function startRec() {
     if (rec !== r) return;
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
-      const res = e.results[i], text = res[0].transcript.trim();
+      const res = e.results[i];
+      let text = res[0].transcript.trim();
       if (!res.isFinal) { interim += ' ' + text; continue; }
+      if (!r.ptt && !wakeRe.test(fuzzyWake(text))) {
+        for (let k = 1; k < res.length; k++) { const alt = res[k].transcript.trim(); if (wakeRe.test(fuzzyWake(alt))) { text = alt; break; } }
+      }
       if (!text) continue;
       if (!r.ptt && stopRe.test(text) && (busy || speaking) && !isEcho(text)) { clearUtterance(); stopAll(); return; }
       // While Eve talks, anything that isn't addressed to her is just her own voice or background: drop it.
@@ -789,6 +816,14 @@ function startRec() {
   try { r.start(); } catch { if (rec === r) rec = null; }
 }
 
+// Watchdog: the browser recognizer sometimes dies silently or goes deaf after a while, which is why
+// Eve seemed not to hear her name. Restart it if it's gone, and refresh it when it has been idle a long time.
+setInterval(() => {
+  if (!SR || !wakeMode || paused || pushToTalk) return;
+  if (!rec) return startRec();
+  if (!rec.ptt && Date.now() - rec.t0 > 50000 && !heard && !heardInterim && !speaking && !busy && !awaitingCommand) rec.abort(); // onend restarts it
+}, 3000);
+
 // ---------- Endpointing: only act once the user has really stopped talking ----------
 // Final and interim results accumulate in `heard` (across recognizer restarts), and the utterance
 // is handled only after SPEECH_PAUSE_MS with no new speech. Any new result resets the timer.
@@ -796,11 +831,14 @@ const SPEECH_PAUSE_MS = CFG.speechPauseMs || 1800;
 let heard = '', heardInterim = '', silenceTimer = null;
 function armSilence() {
   clearTimeout(silenceTimer);
+  // Just the name ("Eve"): answer quickly instead of waiting out the full pause.
+  const t = normalizeSpeech(heard + ' ' + heardInterim);
+  const nameOnly = !awaitingCommand && !(rec && rec.ptt) && wakeRe.test(t) && !(t.match(wakeRe)[1] || '').trim();
   silenceTimer = setTimeout(() => {
     silenceTimer = null;
     if (rec && rec.ptt) return rec.stop(); // its onend sends the text
     flushUtterance(false);
-  }, SPEECH_PAUSE_MS);
+  }, nameOnly ? Math.min(700, SPEECH_PAUSE_MS) : SPEECH_PAUSE_MS);
 }
 function clearUtterance() { clearTimeout(silenceTimer); silenceTimer = null; heard = heardInterim = ''; showPending(); }
 function showPending() { $('interim').textContent = (heard + ' ' + heardInterim).trim(); }
@@ -817,6 +855,7 @@ function normalizeSpeech(text) {
     .replace(/(^|\s)(?:um+|uh+|erm+|er|hmm+|mm+)[,.]?(?=\s|$)/gi, '$1')
     .trim()
     .replace(/\b([a-z']+)(?:[\s,]+\1\b)+/gi, '$1')
+    .replace(/^[\s\S]*$/, fuzzyWake)
     .replace(new RegExp(`^((?:hey|ok|okay|uy|hoy)[\\s,]+)?(?:${wakeNames})\\b`, 'i'), (_, hey) => (hey || '') + CFG.wakeWord.charAt(0).toUpperCase() + CFG.wakeWord.slice(1))
     .replace(/\s{2,}/g, ' ')
     .trim();
