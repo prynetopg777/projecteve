@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>E.V.E.</title>
+<style>
+  :root {
+    --bg: #04070d;
+    --panel: rgba(10, 22, 38, .72);
+    --line: rgba(80, 200, 255, .18);
+    --cyan: #4fd8ff;
+    --cyan-dim: #2a7fa3;
+    --text: #d6ecf7;
+    --muted: #6f8ea3;
+    --amber: #ffb547;
+    --red: #ff5a6a;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(ellipse at 50% 0%, #0b1d33 0%, var(--bg) 60%) fixed;
+    color: var(--text);
+    font: 15px/1.5 "Segoe UI", system-ui, sans-serif;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 0 16px;
+  }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 14px 0 6px; }
+  .brand { letter-spacing: .4em; font-weight: 600; color: var(--cyan); font-size: 13px; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    font: inherit; font-size: 13px; color: var(--text); cursor: pointer;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px;
+    transition: border-color .2s, color .2s, background .2s;
+  }
+  button:hover { border-color: var(--cyan-dim); }
+  button.on { border-color: var(--cyan); color: var(--cyan); background: rgba(79, 216, 255, .08); }
+
+  main { display: flex; flex-direction: column; min-height: 0; }
+
+  /* Arc reactor */
+  .reactor-wrap { display: flex; flex-direction: column; align-items: center; padding: 10px 0 4px; }
+  .reactor { position: relative; width: 150px; height: 150px; cursor: pointer; }
+  .ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid transparent; }
+  .r1 { border-top-color: var(--cyan); border-bottom-color: var(--cyan); animation: spin 8s linear infinite; opacity: .7; }
+  .r2 { inset: 16px; border-left-color: var(--cyan); border-right-color: var(--cyan); animation: spin 5s linear infinite reverse; opacity: .55; }
+  .r3 { inset: 32px; border: 1px dashed var(--cyan-dim); animation: spin 14s linear infinite; }
+  .core {
+    position: absolute; inset: 52px; border-radius: 50%;
+    background: radial-gradient(circle, #e8fbff 0%, var(--cyan) 35%, rgba(79,216,255,0) 72%);
+    box-shadow: 0 0 30px var(--cyan); opacity: .55; transition: opacity .3s, transform .3s;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 50% { transform: scale(1.18); opacity: 1; } }
+  body[data-state="listening"] .core { opacity: .95; animation: pulse 1.1s ease-in-out infinite; }
+  body[data-state="thinking"] .r1 { animation-duration: 1.2s; }
+  body[data-state="thinking"] .r2 { animation-duration: .8s; }
+  body[data-state="thinking"] .core { opacity: .8; }
+  body[data-state="speaking"] .core { opacity: 1; animation: pulse .45s ease-in-out infinite; }
+  .state { margin-top: 8px; font-size: 12px; letter-spacing: .25em; text-transform: uppercase; color: var(--muted); min-height: 18px; }
+  .interim { font-style: italic; color: var(--muted); min-height: 22px; text-align: center; padding: 0 8px; }
+
+  /* Transcript */
+  .log {
+    flex: 1; overflow-y: auto; min-height: 0; padding: 8px 4px 16px;
+    display: flex; flex-direction: column; gap: 10px;
+    mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
+  }
+  .msg { max-width: 85%; padding: 9px 14px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.user { align-self: flex-end; background: rgba(79, 216, 255, .12); border: 1px solid rgba(79,216,255,.25); }
+  .msg.eve { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); }
+  .msg.reminder { align-self: center; color: var(--amber); border: 1px solid rgba(255,181,71,.4); background: rgba(255,181,71,.08); }
+  .msg.error { align-self: center; color: var(--red); border: 1px solid rgba(255,90,106,.4); font-size: 13px; }
+  .tool { align-self: flex-start; font: 12px/1.4 Consolas, monospace; color: var(--muted); padding-left: 6px; overflow-wrap: anywhere; }
+  .tool::before { content: "⚙ "; color: var(--cyan-dim); }
+  .msg.system { align-self: center; color: var(--muted); font-size: 13px; border: 1px dashed var(--line); }
+  .model { margin-left: 10px; font-size: 10px; letter-spacing: .15em; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; text-transform: uppercase; }
+  .model:empty { display: none; }
+  body[data-state="permission"] .core { background: radial-gradient(circle, #fff3dc 0%, var(--amber) 35%, rgba(255,181,71,0) 72%); box-shadow: 0 0 30px var(--amber); opacity: 1; animation: pulse .8s ease-in-out infinite; }
+
+  /* Permission request card */
+  .perm { align-self: stretch; border: 1px solid rgba(255,181,71,.45); background: rgba(255,181,71,.06); border-radius: 14px; padding: 10px 14px; }
+  .perm-title { color: var(--amber); font-weight: 600; }
+  .perm pre { max-height: 180px; }
+  .perm-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  .perm-actions .allow { border-color: rgba(92,255,176,.5); color: #7dffc0; }
+  .perm-actions .deny { border-color: rgba(255,90,106,.5); color: var(--red); }
+  .perm-hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .perm.done { opacity: .6; }
+  .perm-result { margin-top: 6px; font-size: 13px; color: var(--muted); }
+  .banner { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; margin: 6px 0; padding: 8px 12px; border: 1px solid var(--cyan-dim); border-radius: 12px; font-size: 13px; }
+  pre { background: #020409; border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow-x: auto; white-space: pre; font: 13px/1.45 Consolas, monospace; margin: 6px 0; }
+
+  /* Input */
+  form { display: flex; gap: 8px; padding: 10px 0 calc(14px + env(safe-area-inset-bottom, 0px)); }
+  input[type=text] {
+    flex: 1; min-width: 0; font: inherit; color: var(--text);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; outline: none;
+  }
+  input[type=text]:focus { border-color: var(--cyan-dim); }
+  .mic { width: 44px; height: 44px; padding: 0; display: grid; place-items: center; flex: none; }
+  .mic svg { width: 20px; height: 20px; fill: currentColor; }
+
+  /* Boot overlay (browsers need a click before audio/mic) */
+  .boot {
+    position: fixed; inset: 0; display: grid; place-items: center; background: rgba(2, 5, 10, .92); z-index: 10;
+  }
+  .boot button { font-size: 16px; padding: 14px 32px; letter-spacing: .2em; border-color: var(--cyan); color: var(--cyan); }
+  .boot p { color: var(--muted); text-align: center; font-size: 13px; margin-top: 14px; }
+</style>
+</head>
+<body data-state="idle">
+  <div class="boot" id="boot">
+    <div>
+      <button id="bootBtn">INITIALIZE E.V.E.</button>
+      <p id="bootNote">Allow microphone access when asked.</p>
+    </div>
+  </div>
+
+  <header>
+    <div class="brand">E.V.E.<span class="model" id="model" title="Claude model Eve is currently using"></span></div>
+    <div class="controls">
+      <button id="wakeBtn" title="Listen continuously for the wake word">Wake word</button>
+      <button id="muteBtn" title="Turn spoken replies on/off">Voice on</button>
+      <button id="stopBtn" title="Interrupt (Esc)">Stop</button>
+      <button id="newBtn" title="Start a fresh conversation (memory is kept)">New chat</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="banner" id="banner" hidden>Eve updated her interface. <button id="reloadBtn">Reload</button></div>
+    <div class="reactor-wrap">
+      <div class="reactor" id="reactor" title="Click to talk">
+        <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><div class="core"></div>
+      </div>
+      <div class="state" id="state">standby</div>
+      <div class="interim" id="interim"></div>
+    </div>
+    <div class="log" id="log"></div>
+  </main>
+
+  <form id="form" autocomplete="off">
+    <input type="text" id="input" placeholder="Type a message or click the mic…">
+    <button type="button" class="mic" id="micBtn" title="Push to talk (Ctrl+Space)">
+      <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z"/></svg>
+    </button>
+  </form>
+
+<script>
+const CFG = /*CONFIG*/;
+const $ = (id) => document.getElementById(id);
+const log = $('log');
+
+// ---------- UI helpers ----------
+let busy = false, speaking = false, listening = false, reportedState = null;
+const perms = new Map(); // pending permission id -> card element
+function render() {
+  const base = speaking ? 'speaking' : listening ? 'listening' : busy ? 'thinking' : 'idle';
+  const state = perms.size ? 'permission' : base;
+  document.body.dataset.state = state;
+  $('state').textContent = { idle: wakeMode ? `say "${CFG.wakeWord}"` : 'standby', listening: 'listening', thinking: 'processing', speaking: 'speaking', permission: 'awaiting your ok' }[state];
+  // Tell the server (and through it, the desktop overlay) what we're doing.
+  if (base !== reportedState) { reportedState = base; postJson('/api/ui-state', { state: base }).catch(() => {}); }
+}
+function addMsg(cls, text) {
+  const el = document.createElement('div');
+  el.className = cls === 'tool' ? 'tool' : `msg ${cls}`;
+  el.textContent = text;
+  log.append(el);
+  log.scrollTop = log.scrollHeight;
+  return el;
+}
+// Minimal markdown: fenced code blocks become <pre>, everything else stays plain text.
+function renderReply(el, text) {
+  el.replaceChildren();
+  text.split(/(```[\s\S]*?(?:```|$))/).forEach((part) => {
+    if (part.startsWith('```')) {
+      const pre = document.createElement('pre');
+      pre.textContent = part.replace(/^```[^\n]*\n?/, '').replace(/```$/, '');
+      el.append(pre);
+    } else if (part) {
+      el.append(part.replace(/\*\*(.+?)\*\*/g, '$1'));
+    }
+  });
+  log.scrollTop = log.scrollHeight;
+}
+function chime(freq = 880) {
+  try {
+    const ctx = chime.ctx ||= new AudioContext();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.frequency.value = freq; o.type = 'sine';
+    g.gain.setValueAtTime(.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.15, ctx.currentTime + .02);
+    g.gain.exponentialRampToValueAtTime(.0001, ctx.currentTime + .25);
+    o.connect(g).connect(ctx.destination); o.start(); o.stop(ctx.currentTime + .26);
+  } catch {}
+}
+
+// ---------- Text to speech ----------
+let voiceOn = true, voice = null;
+function pickVoice() {
+  const voices = speechSynthesis.getVoices();
+  const want = (CFG.voice || '').toLowerCase();
+  voice = (want && voices.find((v) => v.name.toLowerCase().includes(want)))
+    || voices.find((v) => /Natural/i.test(v.name) && /en-GB/i.test(v.lang) && /Sonia|Libby|Maisie|Hollie|Bella/i.test(v.name))
+    || voices.find((v) => /Natural/i.test(v.name) && /^en/i.test(v.lang) && /Aria|Jenny|Ava|Emma|Michelle|Natasha/i.test(v.name))
+    || voices.find((v) => /^en/i.test(v.lang) && /Hazel|Susan|Zira|Samantha|Serena|Kate|Female/i.test(v.name))
+    || voices.find((v) => /^en/i.test(v.lang)) || null;
+}
+speechSynthesis.onvoiceschanged = pickVoice; pickVoice();
+
+let ttsPending = 0;
+function say(text, onEnd) {
+  text = text.trim();
+  if (!voiceOn || !text) return onEnd?.();
+  const u = new SpeechSynthesisUtterance(text);
+  if (voice) u.voice = voice;
+  u.rate = 1.05;
+  ttsPending++;
+  speaking = true; pauseRecognition(); render();
+  u.onend = u.onerror = () => {
+    if (--ttsPending <= 0) { ttsPending = 0; speaking = false; render(); resumeRecognition(); }
+    onEnd?.();
+  };
+  speechSynthesis.speak(u);
+}
+function shutUp() { speechSynthesis.cancel(); ttsPending = 0; speaking = false; render(); resumeRecognition(); }
+
+// Turn reply markdown into speakable text. Unclosed code fences cut off the text (rest isn't final yet).
+function speakable(text) {
+  let t = text.replace(/```[\s\S]*?```/g, ' ');
+  const open = t.indexOf('```');
+  if (open !== -1) t = t.slice(0, open);
+  return t.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, 'the link')
+          .replace(/[*_`#>|]/g, '').replace(/^\s*[-•]\s+/gm, '');
+}
+
+// ---------- Streaming reply ----------
+let replyEl = null, replyText = '', spokenLen = 0;
+function onDelta(text) {
+  if (!replyEl) {
+    text = text.replace(/^\s+/, ''); // new bubble after a tool call: drop the separator newlines
+    if (!text) return;
+    replyEl = addMsg('eve', ''); replyText = ''; spokenLen = 0;
+  }
+  replyText += text;
+  renderReply(replyEl, replyText);
+  // Speak each finished sentence as soon as it arrives.
+  const clean = speakable(replyText);
+  const m = clean.slice(spokenLen).match(/^[\s\S]*[.!?:;](?=\s)|^[\s\S]*\n/);
+  if (m) { say(m[0]); spokenLen += m[0].length; }
+}
+function onDone() {
+  if (replyEl) say(speakable(replyText).slice(spokenLen));
+  replyEl = null;
+}
+
+// ---------- Server connection ----------
+const events = new EventSource('/events');
+events.onmessage = (e) => {
+  const ev = JSON.parse(e.data);
+  switch (ev.type) {
+    case 'hello':
+      busy = ev.busy; setModel(ev.model);
+      if (ev.uiHash !== CFG.uiHash) $('banner').hidden = false;
+      for (const id of [...perms.keys()]) if (!ev.pending.some((p) => p.id === id)) resolvePermission(id, 'cancelled');
+      ev.pending.forEach(showPermission);
+      render();
+      break;
+    case 'model': setModel(ev.model); break;
+    case 'permission': showPermission(ev); break;
+    case 'permission-resolved': resolvePermission(ev.id, ev.decision); break;
+    case 'restarting': replyEl = null; addMsg('system', '♻ Restarting to load my updates. Back in a moment.'); break;
+    case 'busy': busy = ev.busy; render(); break;
+    case 'user': if (ev.text !== lastSent) addMsg('user', ev.text); lastSent = null; break;
+    case 'delta': onDelta(ev.text); break;
+    case 'tool': replyEl = null; addMsg('tool', `${ev.sub ? '↳ ' : ''}${ev.name}${ev.detail ? ': ' + ev.detail : ''}`); break;
+    case 'done': onDone(); break;
+    case 'error': replyEl = null; addMsg('error', ev.message); chime(220); break;
+    case 'reminder':
+      addMsg('reminder', `⏰ ${ev.text}`); chime(660); setTimeout(() => chime(990), 180);
+      say(`Pardon the interruption, ${CFG.honorific}. Reminder: ${ev.text}`);
+      if (Notification.permission === 'granted') new Notification('EVE reminder', { body: ev.text });
+      break;
+    case 'reset': log.replaceChildren(); addMsg('eve', 'Fresh conversation. My long-term memory is intact.'); break;
+  }
+};
+
+function setModel(m) { $('model').textContent = m || ''; }
+
+// ---------- Permission requests ----------
+function showPermission(req) {
+  if (perms.has(req.id)) return;
+  replyEl = null;
+  const el = document.createElement('div');
+  el.className = 'perm';
+  const title = document.createElement('div');
+  title.className = 'perm-title';
+  title.textContent = `🔐 May I ${req.title}?`;
+  el.append(title);
+  if (req.detail) { const pre = document.createElement('pre'); pre.textContent = req.detail; el.append(pre); }
+  const row = document.createElement('div');
+  row.className = 'perm-actions';
+  for (const [label, decision] of [['Allow', 'allow'], ['Allow for this session', 'always'], ['Deny', 'deny']]) {
+    const b = document.createElement('button');
+    b.textContent = label; b.className = decision;
+    b.onclick = () => answerPermission(req.id, decision);
+    row.append(b);
+  }
+  const hint = document.createElement('div');
+  hint.className = 'perm-hint';
+  hint.textContent = 'Or just say "yes" or "no".';
+  el.append(row, hint);
+  log.append(el);
+  log.scrollTop = log.scrollHeight;
+  perms.set(req.id, el);
+  render();
+  chime(740);
+  const hon = CFG.honorific.charAt(0).toUpperCase() + CFG.honorific.slice(1);
+  say(`${hon}, may I ${req.title}?`);
+}
+function resolvePermission(id, decision) {
+  const el = perms.get(id);
+  if (!el) return;
+  perms.delete(id);
+  el.classList.add('done');
+  el.querySelector('.perm-hint')?.remove();
+  const result = document.createElement('div');
+  result.className = 'perm-result';
+  result.textContent = { allow: '✓ Allowed', always: '✓ Allowed for this session', deny: '✕ Denied', cancelled: '— Cancelled' }[decision] || decision;
+  el.querySelector('.perm-actions').replaceWith(result);
+  render();
+}
+function answerPermission(id, decision) { postJson('/api/permission', { id, decision }); }
+// Spoken/typed "yes"/"no" answers the oldest pending request. Returns true if it was an answer.
+const yesRe = /^(yes|yeah|yep|yup|sure|go ahead|do it|allow( it)?|okay|ok|please do|please|approved?|affirmative|of course)\b/i;
+const noRe = /^(no|nope|don'?t|deny|denied|decline|cancel|negative|not now)\b/i;
+function answerByVoice(text) {
+  if (!perms.size) return false;
+  const t = text.replace(new RegExp(`^(?:hey )?(?:${wakeNames})[\\s,.!?]*`, 'i'), '').trim();
+  const id = perms.keys().next().value;
+  if (yesRe.test(t)) { answerPermission(id, 'allow'); return true; }
+  if (noRe.test(t)) { answerPermission(id, 'deny'); return true; }
+  return false;
+}
+
+let lastSent = null;
+async function send(text) {
+  text = text.trim();
+  if (!text) return;
+  if (answerByVoice(text)) return;
+  shutUp();
+  lastSent = text;
+  addMsg('user', text);
+  const r = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+  if (!r.ok) addMsg('error', `Request failed (${r.status})`);
+}
+function postJson(path, body = {}) {
+  return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+const post = (path) => postJson(path);
+function stopAll() { shutUp(); post('/api/stop'); replyEl = null; }
+
+// ---------- Speech recognition ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, wakeMode = false, pushToTalk = false, awaitingCommand = 0, pttText = '', paused = false;
+const wakeNames = [CFG.wakeWord, ...(CFG.wakeAliases || [])].join('|');
+const wakeRe = new RegExp(`\\b(?:hey |ok |okay )?(?:${wakeNames})\\b[\\s,.!?]*(.*)`, 'i');
+const stopRe = new RegExp(`^((?:${wakeNames})[, ]+)?(stop|cancel|never ?mind|shut up|be quiet)\\.?$`, 'i');
+
+// Each recognizer instance `r` only touches shared state while it is still the current `rec`,
+// so aborting one and starting another can't race.
+function startRec() {
+  if (!SR || rec || (paused && !pushToTalk)) return;
+  const r = new SR();
+  rec = r;
+  r.ptt = pushToTalk;
+  r.lang = navigator.language || 'en-US';
+  r.continuous = !r.ptt;
+  r.interimResults = true;
+  r.onstart = () => { listening = r.ptt || awaitingCommand > Date.now(); render(); };
+  r.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const res = e.results[i], text = res[0].transcript;
+      if (!res.isFinal) { interim += text; continue; }
+      handleFinal(text.trim(), r);
+    }
+    $('interim').textContent = interim;
+  };
+  r.onerror = (e) => {
+    if (e.error === 'not-allowed') { addMsg('error', 'Microphone access was denied.'); wakeMode = false; updateButtons(); }
+  };
+  r.onend = () => {
+    if (rec === r) rec = null;
+    listening = false; $('interim').textContent = ''; render();
+    if (r.ptt) { pushToTalk = false; send(pttText); pttText = ''; }
+    if (wakeMode && !paused && !rec) setTimeout(startRec, 250); // Chrome/Edge stop continuous mode periodically
+  };
+  try { r.start(); } catch { if (rec === r) rec = null; }
+}
+
+function handleFinal(text, r) {
+  if (!text) return;
+  if (r.ptt) { pttText += ' ' + text; return; }
+  if (answerByVoice(text)) return; // "yes"/"no" to a permission request needs no wake word
+  if (stopRe.test(text) && (busy || speaking)) { stopAll(); return; }
+  if (awaitingCommand > Date.now()) { awaitingCommand = 0; listening = false; render(); send(text); return; }
+  const m = text.match(wakeRe);
+  if (!m) return;
+  if (m[1].trim()) send(m[1]);
+  else acknowledgeWake();
+}
+
+// Just "Hey Eve": answer out loud right away (no round trip to Claude), then listen for the request.
+const COMMAND_WINDOW_MS = 10000;
+function acknowledgeWake() {
+  shutUp();
+  const replies = (CFG.wakeReplies || ['Yes?']).map((r) => r.replaceAll('{honorific}', CFG.honorific));
+  const reply = replies[Math.floor(Math.random() * replies.length)];
+  addMsg('eve', reply);
+  say(reply, () => {
+    chime();
+    awaitingCommand = Date.now() + COMMAND_WINDOW_MS;
+    listening = true; render();
+    setTimeout(() => { if (awaitingCommand && awaitingCommand <= Date.now()) { awaitingCommand = 0; listening = false; render(); } }, COMMAND_WINDOW_MS + 100);
+  });
+}
+
+// Don't let Eve hear herself talk.
+function pauseRecognition() { paused = true; if (rec && !rec.ptt) rec.abort(); }
+function resumeRecognition() { paused = false; if (wakeMode && !rec) startRec(); }
+
+function talk() {
+  if (!SR) return addMsg('error', 'Speech recognition is not supported in this browser. Use Edge or Chrome.');
+  shutUp();
+  if (rec) { const old = rec; rec = null; old.abort(); }
+  pushToTalk = true; pttText = '';
+  chime();
+  setTimeout(startRec, 80);
+}
+
+// ---------- Controls ----------
+function updateButtons() {
+  $('wakeBtn').classList.toggle('on', wakeMode);
+  $('muteBtn').classList.toggle('on', voiceOn);
+  $('muteBtn').textContent = voiceOn ? 'Voice on' : 'Voice off';
+  render();
+}
+$('wakeBtn').onclick = () => {
+  wakeMode = !wakeMode;
+  if (wakeMode) startRec(); else if (rec) rec.abort();
+  updateButtons();
+};
+$('muteBtn').onclick = () => { voiceOn = !voiceOn; if (!voiceOn) shutUp(); updateButtons(); };
+$('stopBtn').onclick = stopAll;
+$('reloadBtn').onclick = () => location.reload();
+$('newBtn').onclick = () => { stopAll(); post('/api/reset'); };
+$('micBtn').onclick = talk;
+$('reactor').onclick = talk;
+$('form').onsubmit = (e) => { e.preventDefault(); send($('input').value); $('input').value = ''; };
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') stopAll();
+  if (e.code === 'Space' && e.ctrlKey) { e.preventDefault(); talk(); }
+});
+
+$('bootBtn').onclick = async () => {
+  $('boot').remove();
+  try { (await navigator.mediaDevices.getUserMedia({ audio: true })).getTracks().forEach((t) => t.stop()); } catch {}
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  wakeMode = !!SR;
+  if (wakeMode) startRec();
+  updateButtons();
+  const h = new Date().getHours();
+  const greet = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+  const line = `${greet}, ${CFG.honorific}. All systems online.`;
+  addMsg('eve', line + (SR ? ` Say "${CFG.wakeWord}" followed by your request.` : ''));
+  say(line);
+};
+if (!SR) $('bootNote').textContent = 'Voice input needs Edge or Chrome. Text chat works everywhere.';
+updateButtons();
+</script>
+</body>
+</html>

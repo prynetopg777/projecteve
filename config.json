@@ -1,0 +1,24 @@
+{
+  "port": 7777,
+  "model": "sonnet",
+  "honorific": "sir",
+  "wakeWord": "eve",
+  "wakeAliases": ["eva", "evie"],
+  "wakeReplies": ["Yes, {honorific}?", "I'm here.", "How can I help?", "Listening.", "At your service, {honorific}."],
+  "voice": "",
+  "overlay": true,
+  "openBrowser": true,
+  "browser": "msedge",
+  "claudePath": "",
+  "extraDirs": ["~"],
+  "autoAllow": [
+    "Read",
+    "Glob",
+    "Grep",
+    "WebSearch",
+    "WebFetch",
+    "TodoWrite",
+    "Task",
+    "Agent"
+  ]
+}

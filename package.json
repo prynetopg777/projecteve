@@ -1,0 +1,17 @@
+{
+  "name": "eve",
+  "version": "0.1.0",
+  "description": "A personal voice assistant that uses the Claude Code CLI as its brain",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/launcher.mjs",
+    "server": "node src/server.mjs",
+    "chat": "node src/cli.mjs",
+    "remind": "node tools/remind.mjs",
+    "eve": "node tools/eve.mjs"
+  }
+}
