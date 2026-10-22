@@ -493,7 +493,10 @@ function chime(freq = 880) {
 }
 
 // ---------- Text to speech ----------
-let voiceOn = true, voice = null;
+let voiceOn = true, voice = null, voiceFil = null;
+// Tagalog or Taglish? Count common Filipino function words.
+const FIL_WORDS = /\b(ang|ng|mga|sa|na|po|opo|ko|mo|niya|ito|yung|naman|lang|ba|hindi|wala|meron|kasi|talaga|sige|ikaw|ako|siya|natin|kayo|pala|din|rin)\b/gi;
+const isFilipino = (text) => (text.match(FIL_WORDS) || []).length >= Math.max(2, text.split(/\s+/).length * 0.15);
 function pickVoice() {
   const voices = speechSynthesis.getVoices();
   const want = (CFG.voice || '').toLowerCase();
@@ -502,6 +505,9 @@ function pickVoice() {
     || voices.find((v) => /Natural/i.test(v.name) && /^en/i.test(v.lang) && /Aria|Jenny|Ava|Emma|Michelle|Natasha/i.test(v.name))
     || voices.find((v) => /^en/i.test(v.lang) && /Hazel|Susan|Zira|Samantha|Serena|Kate|Female/i.test(v.name))
     || voices.find((v) => /^en/i.test(v.lang)) || null;
+  // Filipino replies use a Filipino voice (Edge: "Blessica Online (Natural)") when one is installed.
+  voiceFil = voices.find((v) => /^(fil|tl)/i.test(v.lang) && /Natural/i.test(v.name) && /Blessica|Female/i.test(v.name))
+    || voices.find((v) => /^(fil|tl)/i.test(v.lang)) || null;
 }
 speechSynthesis.onvoiceschanged = pickVoice; pickVoice();
 
@@ -519,7 +525,8 @@ function say(text, onEnd) {
   if (!voiceOn || !text) return onEnd?.();
   recentSpeech.push({ text: normWords(text), until: Date.now() + 8000 + text.length * 80 });
   const u = new SpeechSynthesisUtterance(text);
-  if (voice) u.voice = voice;
+  const v = voiceFil && isFilipino(text) ? voiceFil : voice;
+  if (v) { u.voice = v; u.lang = v.lang; }
   u.rate = 1.05;
   ttsPending++;
   speaking = true; pauseRecognition(); render();
@@ -660,8 +667,8 @@ function resolvePermission(id, decision) {
 }
 function answerPermission(id, decision) { postJson('/api/permission', { id, decision }); }
 // Spoken/typed "yes"/"no" answers the oldest pending request. Returns true if it was an answer.
-const yesRe = /^(yes|yeah|yep|yup|sure|go ahead|do it|allow( it)?|okay|ok|please do|please|approved?|affirmative|of course)\b/i;
-const noRe = /^(no|nope|don'?t|deny|denied|decline|cancel|negative|not now)\b/i;
+const yesRe = /^(yes|yeah|yep|yup|sure|go ahead|do it|allow( it)?|okay|ok|please do|please|approved?|affirmative|of course|oo|opo|sige)\b/i;
+const noRe = /^(no|nope|don'?t|deny|denied|decline|cancel|negative|not now|hindi|huwag|wag|ayoko)\b/i;
 function answerByVoice(text) {
   if (!perms.size) return false;
   const t = text.replace(new RegExp(`^(?:hey )?(?:${wakeNames})[\\s,.!?]*`, 'i'), '').trim();
@@ -695,8 +702,10 @@ function stopAll() { shutUp(); post('/api/stop'); replyEl = null; }
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null, wakeMode = false, pushToTalk = false, awaitingCommand = 0, paused = false;
 const wakeNames = [CFG.wakeWord, ...(CFG.wakeAliases || [])].join('|');
-const wakeRe = new RegExp(`\\b(?:hey |ok |okay )?(?:${wakeNames})\\b[\\s,.!?]*(.*)`, 'i');
-const stopRe = new RegExp(`^((?:${wakeNames})[, ]+)?(stop|cancel|never ?mind|shut up|be quiet)\\.?$`, 'i');
+const wakeRe = new RegExp(`\\b(?:hey |ok |okay |uy |hoy )?(?:${wakeNames})\\b[\\s,.!?]*(.*)`, 'i');
+// English and Filipino stop words: "stop", "tama na", "tigil"…
+const STOP_WORDS = 'stop|cancel|never ?mind|shut up|be quiet|tama na|tigil|hinto|(?:hu)?wag na|ayoko na';
+const stopRe = new RegExp(`^((?:${wakeNames})[, ]+)?(${STOP_WORDS})\\.?$`, 'i');
 
 // Each recognizer instance `r` only touches shared state while it is still the current `rec`,
 // so aborting one and starting another can't race.
@@ -705,7 +714,7 @@ function startRec() {
   const r = new SR();
   rec = r;
   r.ptt = pushToTalk;
-  r.lang = navigator.language || 'en-US';
+  r.lang = CFG.speechLang || navigator.language || 'en-US'; // fil-PH also understands English and Taglish
   r.continuous = true; // push-to-talk too: the silence timer decides when you're done, not the browser
   r.interimResults = true;
   r.onstart = () => {
@@ -775,7 +784,7 @@ function normalizeSpeech(text) {
     .replace(/(^|\s)(?:um+|uh+|erm+|er|hmm+|mm+)[,.]?(?=\s|$)/gi, '$1')
     .trim()
     .replace(/\b([a-z']+)(?:[\s,]+\1\b)+/gi, '$1')
-    .replace(new RegExp(`^((?:hey|ok|okay)[\\s,]+)?(?:${wakeNames})\\b`, 'i'), (_, hey) => (hey || '') + CFG.wakeWord.charAt(0).toUpperCase() + CFG.wakeWord.slice(1))
+    .replace(new RegExp(`^((?:hey|ok|okay|uy|hoy)[\\s,]+)?(?:${wakeNames})\\b`, 'i'), (_, hey) => (hey || '') + CFG.wakeWord.charAt(0).toUpperCase() + CFG.wakeWord.slice(1))
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
@@ -809,7 +818,7 @@ function acknowledgeWake() {
 // ---------- Barge-in: interrupt Eve mid-sentence or mid-task ----------
 // The mic stays on while she talks (set "bargeIn": false in config.json to mute it instead).
 // Her own voice is filtered out by isEcho(); only her name or a stop phrase gets through.
-const bargeStopRe = new RegExp(`(?:^|\\b(?:${wakeNames})\\b[\\s,.!?]*)(stop|cancel|never ?mind|shut up|be quiet|wait|hold on|pause|enough)\\b`, 'i');
+const bargeStopRe = new RegExp(`(?:^|\\b(?:${wakeNames})\\b[\\s,.!?]*)(${STOP_WORDS}|wait|hold on|pause|enough|teka|sandali)\\b`, 'i');
 const wakeHit = (text) => new RegExp(`\\b(?:${wakeNames})\\b`, 'i').test(text) && !isEcho(text);
 let lastBarge = 0;
 function bargeIn(text) {

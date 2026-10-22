@@ -95,6 +95,7 @@ src/launcher.mjs supervises the server: restarts and crash rollback
 | `model` | Default model: `haiku`, `sonnet` or `opus` |
 | `honorific` | What Eve calls you |
 | `wakeWord`, `wakeAliases` | `eve`, plus common mishearings |
+| `speechLang` | Speech recognition language. `fil-PH` (default) understands Filipino, English and Taglish; use `en-US` for English only. Filipino replies use a Filipino voice when Edge has one |
 | `speechPauseMs` | Silence (ms) after you stop talking before Eve acts on what you said (default 1800) |
 | `autoRefresh` | Start a fresh conversation between turns once it gets heavy, to keep replies fast; memory files carry over (default true). Never happens mid-turn, during a permission prompt or an approved task. `POST /api/refresh` triggers it manually |
 | `refreshTokens` | Refresh once a turn's prompt (input + cached tokens) reaches this size (default 60000) |
