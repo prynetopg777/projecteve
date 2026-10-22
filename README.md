@@ -96,6 +96,9 @@ src/launcher.mjs supervises the server: restarts and crash rollback
 | `honorific` | What Eve calls you |
 | `wakeWord`, `wakeAliases` | `eve`, plus common mishearings |
 | `speechPauseMs` | Silence (ms) after you stop talking before Eve acts on what you said (default 1800) |
+| `autoRefresh` | Start a fresh conversation between turns once it gets heavy, to keep replies fast; memory files carry over (default true). Never happens mid-turn, during a permission prompt or an approved task. `POST /api/refresh` triggers it manually |
+| `refreshTokens` | Refresh once a turn's prompt (input + cached tokens) reaches this size (default 60000) |
+| `refreshTurns` | Refresh after this many turns in a conversation (default 40) |
 | `overlay` | Show the desktop indicator |
 | `autoAllow` | Tools that never need approval. Keep this to read-only tools. |
 | `extraDirs` | Folders Eve may access besides `workspace/` (default: your home folder) |

@@ -583,6 +583,7 @@ events.onmessage = (e) => {
     case 'task': setTask(ev.task); if (!ev.task && ev.reason === 'done') addMsg('system', '✓ Task finished. Normal permission prompts are back.'); break;
     case 'permission': showPermission(ev); break;
     case 'permission-resolved': resolvePermission(ev.id, ev.decision); break;
+    case 'refreshed': replyEl = null; addMsg('system', '🧹 Context refreshed to stay fast. Memory intact.'); break;
     case 'restarting': replyEl = null; addMsg('system', '♻ Restarting to load my updates. Back in a moment.'); break;
     case 'busy': busy = ev.busy; render(); break;
     case 'user': if (ev.text !== lastSent) addMsg('user', ev.text); lastSent = null; break;

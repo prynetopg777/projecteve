@@ -31,6 +31,7 @@ brain.on('error', (err) => broadcast({ type: 'error', message: err.message }));
 brain.on('model', (model) => broadcast({ type: 'model', model }));
 brain.on('task', (task, reason) => broadcast({ type: 'task', task, reason }));
 brain.on('auto', (on) => { console.log(on ? '⚡ Auto mode ON: Eve acts without asking' : '🔐 Auto mode off'); broadcast({ type: 'auto', on }); });
+brain.on('refreshed', () => { console.log('🧹 Context refreshed: fresh session (memory kept)'); broadcast({ type: 'refreshed' }); });
 brain.on('permission-resolved', (ev) => broadcast({ type: 'permission-resolved', ...ev }));
 brain.on('permission', (req) => {
   console.log(`🔐 Asking permission to ${req.title}`);
@@ -153,6 +154,9 @@ const routes = {
     brain.reset();
     broadcast({ type: 'reset' });
     json(res, 200, { ok: true });
+  },
+  'POST /api/refresh': (req, res) => {
+    json(res, 200, { ok: true, now: brain.refresh() }); // now=false: deferred until Eve is between turns
   },
   'POST /api/restart': (req, res) => {
     if (!supervised) return json(res, 409, { error: 'Eve is not running under the launcher, so she cannot restart herself. Ask the user to restart start-eve.bat.' });

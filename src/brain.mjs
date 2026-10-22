@@ -33,6 +33,30 @@ export class Brain extends EventEmitter {
     const task = readJson(TASK_FILE);
     this.task = task.until > Date.now() ? task : null; // { plan, until }
     this.autoMode = !!readJson(SETTINGS_FILE).autoMode; // act without permission prompts (except the always-ask list)
+    this.turns = 0; // turns since this conversation (re)started in this run
+    this.refreshDue = false; // context got heavy: start a fresh session at the next quiet moment
+  }
+
+  /**
+   * Start a fresh conversation to keep replies fast, but only between turns, with no
+   * permission prompt waiting and no approved plan running. Memory files carry over.
+   */
+  #maybeRefresh() {
+    if (!this.refreshDue || this.turn || this.pending.size || this.holdTask || this.taskActive) return false;
+    this.refreshDue = false;
+    this.#kill();
+    this.sessionId = null;
+    writeJson(SESSION_FILE, { sessionId: null });
+    this.turns = 0;
+    this.note('Your conversation was refreshed to stay fast; your memory notes are intact.');
+    this.emit('refreshed');
+    return true;
+  }
+
+  /** Manually request a refresh; it happens now if idle, otherwise after the current turn. */
+  refresh() {
+    this.refreshDue = true;
+    return this.#maybeRefresh();
   }
 
   setAutoMode(on) {
@@ -127,6 +151,7 @@ export class Brain extends EventEmitter {
     const run = () =>
       new Promise((resolve, reject) => {
         // Eve switched models during the last turn: restart the process on the new model, same conversation.
+        this.#maybeRefresh();
         if (this.proc && this.runningModel !== this.model) this.#kill();
         if (!this.proc) this.start();
         this.turn = { resolve, reject, text: '', messages: 0 };
@@ -205,6 +230,8 @@ export class Brain extends EventEmitter {
     this.stop();
     this.sessionId = null;
     writeJson(SESSION_FILE, { sessionId: null });
+    this.turns = 0;
+    this.refreshDue = false;
   }
 
   #kill() {
@@ -250,11 +277,19 @@ export class Brain extends EventEmitter {
         this.#delta(ev.delta.text);
       }
     } else if (msg.type === 'assistant') {
+      if (!msg.parent_tool_use_id && msg.message?.usage) turn.usage = msg.message.usage; // latest prompt size
       for (const block of msg.message?.content || []) {
         if (block.type === 'tool_use') this.emit('tool', { name: block.name, input: block.input, sub: !!msg.parent_tool_use_id });
       }
     } else if (msg.type === 'result') {
       this.turn = null;
+      // Context heaviness: the prompt size of the last turn (incl. cached tokens) or the number of turns.
+      const u = turn.usage || {}; // not msg.usage: that sums every API call in the turn
+      const tokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      if (this.cfg.autoRefresh !== false && (tokens >= (this.cfg.refreshTokens || 60000) || ++this.turns >= (this.cfg.refreshTurns || 40))) {
+        this.refreshDue = true;
+      }
+      setImmediate(() => this.#maybeRefresh()); // after this turn settles; skipped if another turn already started
       // A plan approval covers one reply. The exception is a self-restart, after which the plan may carry on.
       if (!this.holdTask) this.endTask('done');
       this.emit('busy', false);
