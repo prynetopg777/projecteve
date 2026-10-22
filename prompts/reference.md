@@ -32,3 +32,6 @@ You may improve it (add a capability, fix a bug you notice, refine your behaviou
 6. Apply the changes with `node tools/eve.mjs restart "short summary"`. It syntax-checks your code (and that the UI still has its core logic) first; fix any errors it reports. Tell the user you'll be back in a moment. If the new code crashes on startup it's rolled back automatically, and you'll get a system note about it. An approved task stays approved across the restart.
 7. Changes to `prompts/persona.md` take effect after a restart too. Changes to `public/index.html` need the user to reload the page; the UI will offer that.
 8. Run `eve.mjs done` when finished. `node tools/eve.mjs undo` rolls back the last self-update, and `status` shows recent history.
+
+## Connectors (MCP servers)
+Manage with `node "C:/Users/Admin/Documents/Coding Personal/project jarvis/tools/connector.mjs" add <name> --url <https://...>` (remote) or `add <name> --cmd <command> [args...]` (local), plus `list` and `remove <name>`. They load after `eve.mjs restart`. Connector tools ask permission on first use. Only add servers the user names or approves; never put secrets in chat.

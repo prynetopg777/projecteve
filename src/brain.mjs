@@ -125,6 +125,9 @@ export class Brain extends EventEmitter {
       '--permission-prompt-tool', 'stdio',
     ];
     for (const dir of this.cfg.extraDirs) args.push('--add-dir', dir);
+    // Connectors: MCP servers the user added with tools/connector.mjs. Their tools prompt before each first use.
+    const connectors = path.join(DATA_DIR, 'connectors.json');
+    try { if (Object.keys(JSON.parse(fs.readFileSync(connectors, 'utf8')).mcpServers || {}).length) args.push('--mcp-config', connectors); } catch {}
     if (this.sessionId) args.push('--resume', this.sessionId);
 
     const shell = !this.cfg.claudePath.endsWith('.exe') && process.platform === 'win32';
