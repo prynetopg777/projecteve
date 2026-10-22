@@ -172,7 +172,28 @@ export class Brain extends EventEmitter {
     return [...this.pending.values()].map((p) => p.req);
   }
 
-  /** Abort the current turn. The conversation is kept; the process restarts on the next ask. */
+  /**
+   * Cut the current reply short, instantly, keeping the Claude process warm (no restart delay).
+   * Pending permission prompts are cancelled. Falls back to a hard stop if the CLI doesn't respond.
+   */
+  interrupt() {
+    const turn = this.turn;
+    if (!turn) return this.endTask('stopped'); // nothing running: keep the warm process
+    if (!this.proc) return this.stop();
+    if (turn.interrupted) return;
+    turn.interrupted = true;
+    for (const [id, p] of this.pending) {
+      clearTimeout(p.timer);
+      this.#send({ type: 'control_response', response: { subtype: 'success', request_id: id, response: { behavior: 'deny', message: 'The user interrupted you.' } } });
+      this.emit('permission-resolved', { id, decision: 'cancelled' });
+    }
+    this.pending.clear();
+    this.#send({ type: 'control_request', request_id: `interrupt-${Date.now()}`, request: { subtype: 'interrupt' } });
+    this.endTask('stopped');
+    setTimeout(() => this.turn === turn && this.stop(), 3000);
+  }
+
+  /** Abort the current turn by killing the process. The conversation is kept; the process restarts on the next ask. */
   stop({ keepTask = false } = {}) {
     this.#kill();
     this.#fail(new Error('stopped'));
@@ -219,6 +240,7 @@ export class Brain extends EventEmitter {
     if (!turn) return;
 
     if (msg.type === 'stream_event') {
+      if (turn.interrupted) return; // drop text still in flight from a reply the user cut off
       const ev = msg.event;
       // Separate text from consecutive assistant messages (e.g. before/after a tool call).
       if (ev.type === 'message_start' && !msg.parent_tool_use_id && turn.messages++ > 0 && turn.text) {
@@ -236,7 +258,9 @@ export class Brain extends EventEmitter {
       // A plan approval covers one reply. The exception is a self-restart, after which the plan may carry on.
       if (!this.holdTask) this.endTask('done');
       this.emit('busy', false);
-      if (msg.is_error || msg.subtype !== 'success') {
+      if (turn.interrupted) {
+        turn.reject(new Error('stopped')); // interrupted by the user: not an error
+      } else if (msg.is_error || msg.subtype !== 'success') {
         const err = new Error(msg.result || msg.errors?.join('; ') || `Claude returned ${msg.subtype}`);
         this.emit('error', err);
         turn.reject(err);

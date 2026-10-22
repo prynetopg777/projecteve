@@ -18,7 +18,7 @@ Click **Initialize**, allow the microphone, then say **"Eve, what's the weather 
 | Action | How |
 |---|---|
 | Talk | Say "Hey Eve, …" in one go, or say just "Hey Eve", wait for her reply ("Yes, sir?"), then speak. You can also click the reactor/mic or press Ctrl+Space. |
-| Interrupt | Esc, the Stop button, or say "Eve, stop" |
+| Interrupt | Anytime, even while she is talking or working: say "Eve, stop" (or "Eve, wait"), or just "stop". You can also press Esc or the Stop button. Saying "Eve, …" with a new request while she is busy cuts her off and switches to it. She stops instantly, without restarting. To keep the mic off while she talks, set `"bargeIn": false`. |
 | Answer a permission request | Click Allow / Deny, or just say "yes" / "no" |
 | Fresh conversation | New chat (long-term memory is kept) |
 

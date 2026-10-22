@@ -119,9 +119,10 @@ function status() {
 
 const routes = {
   'POST /api/ask': async (req, res) => {
-    const { text } = await readJson(req);
+    const { text, interrupt } = await readJson(req);
     if (!text?.trim()) return json(res, 400, { error: 'text required' });
     console.log(`\n🗣  ${text}`);
+    if (interrupt && brain.busy) brain.interrupt(); // a new request supersedes the one in progress
     broadcast({ type: 'user', text });
     brain.ask(text).then(
       (reply) => console.log(`🤖 ${reply}`),
@@ -145,7 +146,7 @@ const routes = {
     json(res, 200, { ok: true, auto: brain.autoMode });
   },
   'POST /api/stop': (req, res) => {
-    brain.stop();
+    brain.interrupt(); // instant; keeps Claude warm (falls back to a hard stop)
     json(res, 200, { ok: true });
   },
   'POST /api/reset': (req, res) => {
@@ -179,7 +180,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/') {
     const html = readPage();
-    const pageCfg = { wakeWord: cfg.wakeWord, wakeAliases: cfg.wakeAliases, wakeReplies: cfg.wakeReplies, speechPauseMs: cfg.speechPauseMs, voice: cfg.voice, honorific: cfg.honorific, uiHash: pageHash(html) };
+    const pageCfg = { wakeWord: cfg.wakeWord, wakeAliases: cfg.wakeAliases, wakeReplies: cfg.wakeReplies, speechPauseMs: cfg.speechPauseMs, bargeIn: cfg.bargeIn, voice: cfg.voice, honorific: cfg.honorific, uiHash: pageHash(html) };
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end(html.replace('/*CONFIG*/', () => JSON.stringify(pageCfg)));
   }

@@ -506,9 +506,18 @@ function pickVoice() {
 speechSynthesis.onvoiceschanged = pickVoice; pickVoice();
 
 let ttsPending = 0;
+// What Eve said recently, so the mic (which stays on while she talks) can ignore her own voice.
+let recentSpeech = [];
+const normWords = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+function isEcho(text) {
+  const n = normWords(text);
+  recentSpeech = recentSpeech.filter((s) => s.until > Date.now());
+  return n.length > 2 && recentSpeech.some((s) => s.text.includes(n));
+}
 function say(text, onEnd) {
   text = text.trim();
   if (!voiceOn || !text) return onEnd?.();
+  recentSpeech.push({ text: normWords(text), until: Date.now() + 8000 + text.length * 80 });
   const u = new SpeechSynthesisUtterance(text);
   if (voice) u.voice = voice;
   u.rate = 1.05;
@@ -669,7 +678,10 @@ async function send(text) {
   shutUp();
   lastSent = text;
   addMsg('user', text);
-  const r = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+  // A new request while Eve is still working replaces the old one instead of queueing behind it.
+  const interrupt = busy;
+  if (interrupt) replyEl = null;
+  const r = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, interrupt }) });
   if (!r.ok) addMsg('error', `Request failed (${r.status})`);
 }
 function postJson(path, body = {}) {
@@ -706,10 +718,13 @@ function startRec() {
       const res = e.results[i], text = res[0].transcript.trim();
       if (!res.isFinal) { interim += ' ' + text; continue; }
       if (!text) continue;
-      if (!r.ptt && stopRe.test(text) && (busy || speaking)) { clearUtterance(); stopAll(); return; }
+      if (!r.ptt && stopRe.test(text) && (busy || speaking) && !isEcho(text)) { clearUtterance(); stopAll(); return; }
+      // While Eve talks, anything that isn't addressed to her is just her own voice or background: drop it.
+      if (!r.ptt && speaking && !wakeHit(text)) { heard = ''; continue; }
       heard = (heard + ' ' + text).trim();
     }
     heardInterim = interim.trim();
+    if (!r.ptt && (busy || speaking) && bargeIn((heard + ' ' + heardInterim).trim())) return;
     if (heard || heardInterim) {
       armSilence();
       if (awaitingCommand) awaitingCommand = Math.max(awaitingCommand, Date.now() + SPEECH_PAUSE_MS + 1000); // don't time out mid-request
@@ -749,7 +764,7 @@ function showPending() { $('interim').textContent = (heard + ' ' + heardInterim)
 function flushUtterance(ptt) {
   const text = normalizeSpeech(heard + ' ' + heardInterim);
   clearUtterance();
-  if (!text) return;
+  if (!text || (!ptt && isEcho(text))) return;
   if (ptt) send(text); else handleFinal(text);
 }
 
@@ -790,8 +805,28 @@ function acknowledgeWake() {
   });
 }
 
-// Don't let Eve hear herself talk.
-function pauseRecognition() { paused = true; if (rec && !rec.ptt) { clearUtterance(); rec.abort(); } }
+// ---------- Barge-in: interrupt Eve mid-sentence or mid-task ----------
+// The mic stays on while she talks (set "bargeIn": false in config.json to mute it instead).
+// Her own voice is filtered out by isEcho(); only her name or a stop phrase gets through.
+const bargeStopRe = new RegExp(`(?:^|\\b(?:${wakeNames})\\b[\\s,.!?]*)(stop|cancel|never ?mind|shut up|be quiet|wait|hold on|pause|enough)\\b`, 'i');
+const wakeHit = (text) => new RegExp(`\\b(?:${wakeNames})\\b`, 'i').test(text) && !isEcho(text);
+let lastBarge = 0;
+function bargeIn(text) {
+  if (!text || isEcho(text)) return false;
+  if (bargeStopRe.test(text) && (wakeHit(text) || stopRe.test(text))) { // "Eve, stop" / "stop" / "Eve, wait"
+    clearUtterance();
+    if (Date.now() - lastBarge < 1500) return true; // same utterance still streaming in
+    lastBarge = Date.now();
+    stopAll(); chime(520);
+    return true;
+  }
+  if (speaking && wakeHit(text)) shutUp(); // "Eve…" while she talks: go quiet, and let the rest of the request come through
+  return false;
+}
+function pauseRecognition() {
+  if (CFG.bargeIn !== false) return;
+  paused = true; if (rec && !rec.ptt) { clearUtterance(); rec.abort(); }
+}
 function resumeRecognition() { paused = false; if (wakeMode && !rec) startRec(); }
 
 function talk() {
