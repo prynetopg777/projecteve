@@ -95,6 +95,7 @@ src/launcher.mjs supervises the server: restarts and crash rollback
 | `model` | Default model: `haiku`, `sonnet` or `opus` |
 | `honorific` | What Eve calls you |
 | `wakeWord`, `wakeAliases` | `eve`, plus common mishearings |
+| `speechPauseMs` | Silence (ms) after you stop talking before Eve acts on what you said (default 1800) |
 | `overlay` | Show the desktop indicator |
 | `autoAllow` | Tools that never need approval. Keep this to read-only tools. |
 | `extraDirs` | Folders Eve may access besides `workspace/` (default: your home folder) |

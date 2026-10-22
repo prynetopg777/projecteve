@@ -23,11 +23,11 @@ const OWN_TOOLS = {
 // Commands that only look at things. A command line is read-only if every piece of it
 // (split on ; && || |) starts with one of these and nothing writes to a file.
 const READ_ONLY =
-  /^(Get-[A-Za-z]+|Select-Object|Where-Object|Sort-Object|Format-(Table|List)|Measure-Object|Select-String|Test-Path|Resolve-Path|Split-Path|Join-Path|Out-String|ls|dir|pwd|cd|whoami|hostname|date|echo|cat|type|head|tail|wc|grep|findstr|find|where|which|tasklist|systeminfo|ipconfig|node\s+(-v|--version|--check)|npm\s+(-v|--version|ls|list)|git\s+(status|log|diff|show|branch|ls-files))\b/i;
+  /^(Get-[A-Za-z]+|Select-Object|Where-Object|Sort-Object|Format-(Table|List)|Measure-Object|Select-String|Test-Path|Resolve-Path|Split-Path|Join-Path|Out-String|ls|dir|pwd|cd|whoami|hostname|date|echo|cat|type|head|tail|wc|grep|findstr|find|where|which|tasklist|systeminfo|ipconfig|ping|nslookup|Test-Connection|Resolve-DnsName|Write-(Output|Host)|ConvertTo-(Json|Csv)|node\s+(-v|--version|--check)|npm\s+(-v|--version|ls|list)|git\s+(status|log|diff|show|branch|ls-files))\b/i;
 const WRITES = /(^|[^-])>|\$\(|`|\bOut-File\b|\bSet-Content\b|\bAdd-Content\b|\bTee-Object\b\b|\bfind\b.*-(delete|exec)/i;
 
 // Opening an app, file or website: `Start-Process spotify`, `start https://...`, `Invoke-Item x.pdf`.
-const OPEN = /^(Start-Process|start|Invoke-Item|ii|explorer(\.exe)?)\s+("[^"]+"|'[^']+'|[^\s;&|<>`$]+)(\s+-(ArgumentList|FilePath)\s+("[^"]+"|'[^']+'|[^\s;&|<>`$]+))?\s*$/i;
+const OPEN = /^(Start-Process(\s+-FilePath)?|start|Invoke-Item|ii|explorer(\.exe)?)\s+("[^"]+"|'[^']+'|[^\s;&|<>`$]+)(\s+-(ArgumentList|FilePath)\s+("[^"]+"|'[^']+'|[^\s;&|<>`$]+))?\s*$/i;
 
 // Never covered by a task approval or a session grant: always shown to the user.
 const ALWAYS_ASK =
@@ -43,6 +43,14 @@ function isReadOnly(cmd) {
   const bare = stripQuotes(cmd);
   if (WRITES.test(bare)) return false;
   return bare.split(/&&|\|\||[;|\n]/).every((part) => !part.trim() || READ_ONLY.test(part.trim()));
+}
+
+// Several simple opens / read-only commands chained with ; or && ("open Spotify and Edge").
+// Each piece must be simple on its own, with balanced quotes, so a separator inside quotes can't split it.
+function isHarmlessChain(cmd) {
+  const parts = cmd.split(/\s*(?:;|&&)\s*/).filter(Boolean);
+  return parts.length > 1 && parts.every((p) =>
+    p.split('"').length % 2 === 1 && p.split("'").length % 2 === 1 && isSimple(p) && (OPEN.test(p) || isOwnTool(p) || isReadOnly(p)));
 }
 
 function parseOwnTool(cmd) {
@@ -119,7 +127,7 @@ export function isAutoAllowed(tool, input = {}, { grants = new Set(), taskActive
   if (grants.has(grantKey(tool, input))) return true;
   if (SHELLS.has(tool)) {
     const cmd = String(input.command || '').trim();
-    return (isSimple(cmd) && (isOwnTool(cmd) || OPEN.test(cmd))) || isReadOnly(cmd);
+    return (isSimple(cmd) && (isOwnTool(cmd) || OPEN.test(cmd))) || isReadOnly(cmd) || isHarmlessChain(cmd);
   }
   // Her notes, memory and to-dos live in workspace/. Her own source code does NOT, so editing it needs approval.
   if (FILE_TOOLS.has(tool)) return inside(input.file_path || input.notebook_path || '', WORKSPACE);

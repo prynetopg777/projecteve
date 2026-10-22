@@ -179,7 +179,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/') {
     const html = readPage();
-    const pageCfg = { wakeWord: cfg.wakeWord, wakeAliases: cfg.wakeAliases, wakeReplies: cfg.wakeReplies, voice: cfg.voice, honorific: cfg.honorific, uiHash: pageHash(html) };
+    const pageCfg = { wakeWord: cfg.wakeWord, wakeAliases: cfg.wakeAliases, wakeReplies: cfg.wakeReplies, speechPauseMs: cfg.speechPauseMs, voice: cfg.voice, honorific: cfg.honorific, uiHash: pageHash(html) };
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end(html.replace('/*CONFIG*/', () => JSON.stringify(pageCfg)));
   }
