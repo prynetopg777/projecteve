@@ -15,6 +15,7 @@ const SESSION_FILE = path.join(DATA_DIR, 'session.json');
 const TASK_FILE = path.join(DATA_DIR, 'task.json'); // the plan the user approved; survives self-restarts
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json'); // { autoMode }
 const MODEL_FILE = path.join(DATA_DIR, 'model.json'); // written by tools/eve.mjs when Eve switches models
+const BRIEFING_FILE = path.join(DATA_DIR, 'briefing.json'); // { date } of the last morning offer
 export const MODELS = ['haiku', 'sonnet', 'opus'];
 const PERMISSION_TIMEOUT_MS = 3 * 60 * 1000;
 
@@ -156,6 +157,7 @@ export class Brain extends EventEmitter {
         if (!this.proc) this.start();
         this.turn = { resolve, reject, text: '', messages: 0, userText: text };
         this.emit('busy', true);
+        this.#briefingNote();
         const notes = this.notes.splice(0).map((n) => `[System note: ${n}]\n`).join('');
         const content = `[${timestamp()} · model: ${this.runningModel} · auto mode: ${this.autoMode ? 'on' : 'off'}]\n${notes}${text}`;
         this.#send({ type: 'user', message: { role: 'user', content } });
@@ -163,6 +165,19 @@ export class Brain extends EventEmitter {
     const p = this.queue.then(run, run);
     this.queue = p.catch(() => {});
     return p;
+  }
+
+  /** First chat of the morning: nudge Eve to offer a briefing (costs nothing unless the user says yes). */
+  #briefingNote() {
+    const hour = new Date().getHours();
+    const today = new Date().toDateString();
+    if (hour < 4 || hour >= 12 || readJson(BRIEFING_FILE).date === today) return;
+    writeJson(BRIEFING_FILE, { date: today });
+    this.note(
+      'First chat of the morning. After handling the user\'s message, briefly offer a morning briefing. If they accept, gather it quickly: ' +
+        'weather for their city (see memory/profile.md; web search), reminders (`node tools/remind.mjs list`), unfinished items in memory/todo.md, ' +
+        'and at most 3 top headlines. Speak it in under 30 seconds, no lists.',
+    );
   }
 
   /** Queue a note for Eve that arrives with the next user message. */

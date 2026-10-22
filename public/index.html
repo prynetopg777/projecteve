@@ -524,6 +524,39 @@ function say(text, onEnd) {
   text = text.trim();
   if (!voiceOn || !text) return onEnd?.();
   recentSpeech.push({ text: normWords(text), until: Date.now() + 8000 + text.length * 80 });
+  if (CFG.localVoice && !isFilipino(text)) return sayLocal(text, onEnd);
+  sayBrowser(text, onEnd);
+}
+
+// Local neural voice (Piper on the CPU): sentences are synthesized ahead and played in order.
+// If the server can't make one, that sentence falls back to the browser voice.
+let ttsQueue = [], ttsPlaying = false, ttsGen = 0, curAudio = null;
+function sayLocal(text, onEnd) {
+  const blob = fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
+    .then((r) => (r.ok ? r.blob() : null)).catch(() => null);
+  ttsQueue.push({ blob, text, onEnd, gen: ttsGen });
+  ttsPending++; speaking = true; pauseRecognition(); render();
+  if (!ttsPlaying) playNext();
+}
+async function playNext() {
+  const it = ttsQueue.shift();
+  if (!it) { ttsPlaying = false; return; }
+  ttsPlaying = true;
+  const finish = () => {
+    if (--ttsPending <= 0) { ttsPending = 0; speaking = false; render(); resumeRecognition(); }
+    it.onEnd?.();
+    playNext();
+  };
+  const blob = await it.blob;
+  if (it.gen !== ttsGen) return; // the user cut her off meanwhile
+  if (!blob) { ttsPending--; sayBrowser(it.text, it.onEnd); return playNext(); }
+  const url = URL.createObjectURL(blob), a = new Audio(url);
+  curAudio = a;
+  a.onended = a.onerror = () => { URL.revokeObjectURL(url); curAudio = null; if (it.gen === ttsGen) finish(); };
+  a.play().catch(() => a.onerror());
+}
+
+function sayBrowser(text, onEnd) {
   const u = new SpeechSynthesisUtterance(text);
   const v = voiceFil && isFilipino(text) ? voiceFil : voice;
   if (v) { u.voice = v; u.lang = v.lang; }
@@ -536,7 +569,7 @@ function say(text, onEnd) {
   };
   speechSynthesis.speak(u);
 }
-function shutUp() { speechSynthesis.cancel(); ttsPending = 0; speaking = false; render(); resumeRecognition(); }
+function shutUp() { ttsGen++; ttsQueue = []; ttsPlaying = false; if (curAudio) { curAudio.pause(); curAudio = null; } speechSynthesis.cancel(); ttsPending = 0; speaking = false; render(); resumeRecognition(); }
 
 // Turn reply markdown into speakable text. Unclosed code fences cut off the text (rest isn't final yet).
 function speakable(text) {

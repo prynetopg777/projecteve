@@ -9,6 +9,8 @@ import { loadConfig, ROOT } from './config.mjs';
 import { startReminderLoop } from './reminders.mjs';
 import * as su from './selfupdate.mjs';
 import { speak } from './speak.mjs';
+import { synthesize, ttsAvailable } from './tts.mjs';
+import { startWatcherLoop } from './watchers.mjs';
 import { openWindow } from './window.mjs';
 
 const cfg = loadConfig();
@@ -48,6 +50,13 @@ startReminderLoop((r) => {
   reminderFlash = { text: r.text, until: Date.now() + 15000 };
   if (clients.size) broadcast({ type: 'reminder', text: r.text });
   else speak(`Reminder: ${r.text}`);
+});
+
+startWatcherLoop((w) => {
+  console.log(`👁  Watcher #${w.id}: ${w.text}`);
+  reminderFlash = { text: w.text, until: Date.now() + 15000 };
+  if (clients.size) broadcast({ type: 'reminder', text: w.text });
+  else speak(w.text);
 });
 
 // ---- Self-update bookkeeping (see src/launcher.mjs and tools/eve.mjs) ----
@@ -136,6 +145,17 @@ const routes = {
     if (!['allow', 'always', 'deny'].includes(decision)) return json(res, 400, { error: 'bad decision' });
     json(res, brain.respond(id, decision) ? 200 : 404, { ok: true });
   },
+  'POST /api/tts': async (req, res) => {
+    const { text } = await readJson(req);
+    if (!text?.trim() || !ttsAvailable()) return json(res, 404, { error: 'no local voice' });
+    try {
+      const wav = await synthesize(String(text));
+      res.writeHead(200, { 'Content-Type': 'audio/wav', 'Content-Length': wav.length, 'Cache-Control': 'no-store' });
+      res.end(wav);
+    } catch (e) {
+      json(res, 500, { error: e.message });
+    }
+  },
   'POST /api/ui-state': async (req, res) => {
     const { state } = await readJson(req);
     if (['idle', 'listening', 'thinking', 'speaking'].includes(state)) uiState = state;
@@ -184,7 +204,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/') {
     const html = readPage();
-    const pageCfg = { wakeWord: cfg.wakeWord, wakeAliases: cfg.wakeAliases, wakeReplies: cfg.wakeReplies, speechPauseMs: cfg.speechPauseMs, speechLang: cfg.speechLang, bargeIn: cfg.bargeIn, voice: cfg.voice, honorific: cfg.honorific, uiHash: pageHash(html) };
+    const pageCfg = { wakeWord: cfg.wakeWord, wakeAliases: cfg.wakeAliases, wakeReplies: cfg.wakeReplies, speechPauseMs: cfg.speechPauseMs, speechLang: cfg.speechLang, bargeIn: cfg.bargeIn, voice: cfg.voice, honorific: cfg.honorific, localVoice: cfg.tts !== 'browser' && ttsAvailable(), uiHash: pageHash(html) };
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
     return res.end(html.replace('/*CONFIG*/', () => JSON.stringify(pageCfg)));
   }

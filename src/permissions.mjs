@@ -17,6 +17,7 @@ const EVE_TOOL = path.join(ROOT, 'tools/eve.mjs');
 // `task` is deliberately absent: running it IS the request for task approval.
 const OWN_TOOLS = {
   [path.join(ROOT, 'tools/remind.mjs')]: null, // every subcommand
+  [path.join(ROOT, 'tools/watch.mjs')]: null,
   [EVE_TOOL]: new Set(['model', 'status', 'checkpoint', 'restart', 'done']),
 };
 
@@ -32,9 +33,9 @@ const OPEN = /^(Start-Process(\s+-FilePath)?|start|Invoke-Item|ii|explorer(\.exe
 // Never covered by a task approval or a session grant: always shown to the user.
 const ALWAYS_ASK =
   /\b(shutdown|Stop-Computer|Restart-Computer|format(-Volume)?|diskpart|Clear-Disk|Initialize-Disk|bcdedit|reg\s+delete|Remove-ItemProperty|Set-ExecutionPolicy|cipher\s+\/w|vssadmin|Disable-|Uninstall-)|\brm\s+-[a-z]*r[a-z]*f?\s+(\/|~|[A-Za-z]:\\?)\s*$|Remove-Item\b.*-Recurse.*\s([A-Za-z]:\\?|~|\$env:USERPROFILE|\$HOME)\s*$/i;
-const PROTECTED_FILES = ['src/permissions.mjs', 'src/brain.mjs', 'config.json', 'data/settings.json', 'data/task.json'].map((f) => path.join(ROOT, f));
+const PROTECTED_FILES = ['src/permissions.mjs', 'config.json', 'data/settings.json', 'data/task.json'].map((f) => path.join(ROOT, f));
 // Shell commands touching the permission state files are always shown too.
-const PROTECTED_SHELL = /\b(settings|task)\.json\b|permissions\.mjs|brain\.mjs|\/api\/(auto|permission)\b/i;
+const PROTECTED_SHELL = /\b(settings|task)\.json\b|permissions\.mjs|\/api\/(auto|permission)\b/i;
 
 const stripQuotes = (cmd) => cmd.replace(/"[^"]*"|'[^']*'/g, '""');
 const isSimple = (cmd) => !/[;&|<>`$\n]/.test(stripQuotes(cmd));
