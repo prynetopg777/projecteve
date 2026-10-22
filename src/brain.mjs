@@ -48,7 +48,7 @@ export class Brain extends EventEmitter {
     this.sessionId = null;
     writeJson(SESSION_FILE, { sessionId: null });
     this.turns = 0;
-    this.note('Your conversation was refreshed to stay fast; your memory notes are intact.');
+    this.note('Your conversation was refreshed to stay fast; your memory notes are intact. Read memory/recent.md now (silently) to pick up where you and the user left off.');
     this.emit('refreshed');
     return true;
   }
@@ -154,7 +154,7 @@ export class Brain extends EventEmitter {
         this.#maybeRefresh();
         if (this.proc && this.runningModel !== this.model) this.#kill();
         if (!this.proc) this.start();
-        this.turn = { resolve, reject, text: '', messages: 0 };
+        this.turn = { resolve, reject, text: '', messages: 0, userText: text };
         this.emit('busy', true);
         const notes = this.notes.splice(0).map((n) => `[System note: ${n}]\n`).join('');
         const content = `[${timestamp()} · model: ${this.runningModel} · auto mode: ${this.autoMode ? 'on' : 'off'}]\n${notes}${text}`;
@@ -301,6 +301,7 @@ export class Brain extends EventEmitter {
         turn.reject(err);
       } else {
         const text = turn.text || msg.result || '';
+        saveRecent(turn.userText, text);
         this.emit('done', text);
         turn.resolve(text);
       }
@@ -337,6 +338,24 @@ export class Brain extends EventEmitter {
     this.emit('busy', false);
     if (err.message !== 'stopped') this.emit('error', err);
     turn.reject(err);
+  }
+}
+
+// The last few exchanges, kept in a markdown file so a refreshed session can pick up the thread.
+const RECENT_FILE = path.join(WORKSPACE, 'memory/recent.md');
+const RECENT_KEEP = 10;
+const RECENT_HEADER = '# Recent conversation (auto-saved, newest last)\n';
+const clip = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s).trim();
+
+function saveRecent(user, reply) {
+  try {
+    const old = fs.existsSync(RECENT_FILE) ? fs.readFileSync(RECENT_FILE, 'utf8').split('\n## ').slice(1) : [];
+    const entry = `${timestamp().replace(/^Now: /, '')}\nUser: ${clip(String(user), 400)}\nEve: ${clip(reply, 600)}\n`;
+    const kept = [...old, entry].slice(-RECENT_KEEP);
+    fs.mkdirSync(path.dirname(RECENT_FILE), { recursive: true });
+    fs.writeFileSync(RECENT_FILE, `${RECENT_HEADER}\n## ${kept.join('\n## ')}`);
+  } catch {
+    // best effort: never break a reply over the log
   }
 }
 
