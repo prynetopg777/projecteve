@@ -9,9 +9,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { DATA_DIR, ROOT, WORKSPACE } from './config.mjs';
-import { describe, grantKey, isAutoAllowed } from './permissions.mjs';
+import { describe, grantKey, isAutoAllowed, isTaskDone } from './permissions.mjs';
 
 const SESSION_FILE = path.join(DATA_DIR, 'session.json');
+const TASK_FILE = path.join(DATA_DIR, 'task.json'); // the plan the user approved; survives self-restarts
 const MODEL_FILE = path.join(DATA_DIR, 'model.json'); // written by tools/eve.mjs when Eve switches models
 export const MODELS = ['haiku', 'sonnet', 'opus'];
 const PERMISSION_TIMEOUT_MS = 3 * 60 * 1000;
@@ -28,10 +29,31 @@ export class Brain extends EventEmitter {
     this.pending = new Map(); // permission request id -> { req, input, timer }
     this.grants = new Set(); // "allow for this session" keys
     this.notes = []; // system notes prepended to the next user message
+    const task = readJson(TASK_FILE);
+    this.task = task.until > Date.now() ? task : null; // { plan, until }
   }
 
   get busy() {
     return !!this.turn;
+  }
+
+  /** An approved plan lets Eve act without further prompts until it's done or expires. */
+  get taskActive() {
+    if (this.task && this.task.until <= Date.now()) this.endTask('expired');
+    return !!this.task;
+  }
+
+  #startTask(plan) {
+    this.task = { plan, until: Date.now() + (this.cfg.taskMinutes || 45) * 60000 };
+    writeJson(TASK_FILE, this.task);
+    this.emit('task', this.task);
+  }
+
+  endTask(reason = 'done') {
+    if (!this.task) return;
+    this.task = null;
+    fs.rmSync(TASK_FILE, { force: true });
+    this.emit('task', null, reason);
   }
 
   /** The model Eve has chosen (falls back to config.model). */
@@ -113,8 +135,9 @@ export class Brain extends EventEmitter {
     if (!p) return false;
     clearTimeout(p.timer);
     this.pending.delete(id);
-    if (decision === 'always') this.grants.add(p.req.key);
     const allow = decision === 'allow' || decision === 'always';
+    if (allow && p.req.kind === 'task') this.#startTask(p.req.detail);
+    else if (decision === 'always') this.grants.add(p.req.key);
     this.#send({
       type: 'control_response',
       response: {
@@ -134,9 +157,10 @@ export class Brain extends EventEmitter {
   }
 
   /** Abort the current turn. The conversation is kept; the process restarts on the next ask. */
-  stop() {
+  stop({ keepTask = false } = {}) {
     this.#kill();
     this.#fail(new Error('stopped'));
+    if (!keepTask) this.endTask('stopped'); // interrupting Eve also withdraws the plan approval
   }
 
   /** Forget the current conversation (long-term memory files are kept). */
@@ -193,6 +217,8 @@ export class Brain extends EventEmitter {
       }
     } else if (msg.type === 'result') {
       this.turn = null;
+      // A plan approval covers one reply. The exception is a self-restart, after which the plan may carry on.
+      if (!this.holdTask) this.endTask('done');
       this.emit('busy', false);
       if (msg.is_error || msg.subtype !== 'success') {
         const err = new Error(msg.result || msg.errors?.join('; ') || `Claude returned ${msg.subtype}`);
@@ -213,7 +239,8 @@ export class Brain extends EventEmitter {
       return;
     }
     const { tool_name: tool, input, description } = request;
-    if (isAutoAllowed(tool, input, this.grants)) {
+    if (isTaskDone(tool, input)) this.endTask('done');
+    if (isAutoAllowed(tool, input, { grants: this.grants, taskActive: this.taskActive })) {
       this.pending.set(id, { req: {}, input });
       return this.respond(id, 'allow');
     }

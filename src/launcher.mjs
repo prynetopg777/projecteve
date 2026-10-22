@@ -3,7 +3,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadConfig, ROOT } from './config.mjs';
+import { DATA_DIR, loadConfig, ROOT } from './config.mjs';
 import * as su from './selfupdate.mjs';
 
 const RESTART_CODE = 75;
@@ -20,6 +20,15 @@ if (cfg.overlay && process.platform === 'win32') {
     { windowsHide: true, stdio: 'ignore' }, // not `detached`: PowerShell exits immediately when detached
   );
   overlay.unref(); // it watches our PID and exits by itself when we're gone
+}
+
+// Create the "Eve" desktop shortcut once (deleting it later is respected). Failure is harmless.
+const shortcutMarker = path.join(DATA_DIR, 'shortcut-created');
+if (cfg.desktopShortcut !== false && process.platform === 'win32' && !fs.existsSync(shortcutMarker)) {
+  spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'tools/create-shortcut.ps1')],
+    { windowsHide: true, stdio: 'ignore' })
+    .on('exit', (code) => { if (code === 0) try { fs.writeFileSync(shortcutMarker, new Date().toISOString()); } catch {} })
+    .on('error', () => {});
 }
 
 function run() {

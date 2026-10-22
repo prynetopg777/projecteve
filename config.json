@@ -7,8 +7,11 @@
   "wakeReplies": ["Yes, {honorific}?", "I'm here.", "How can I help?", "Listening.", "At your service, {honorific}."],
   "voice": "",
   "overlay": true,
+  "taskMinutes": 45,
   "openBrowser": true,
   "browser": "msedge",
+  "appWindow": true,
+  "desktopShortcut": true,
   "claudePath": "",
   "extraDirs": ["~"],
   "autoAllow": [

@@ -12,6 +12,7 @@
     "server": "node src/server.mjs",
     "chat": "node src/cli.mjs",
     "remind": "node tools/remind.mjs",
-    "eve": "node tools/eve.mjs"
+    "eve": "node tools/eve.mjs",
+    "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/create-shortcut.ps1"
   }
 }

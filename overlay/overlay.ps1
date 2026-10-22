@@ -46,11 +46,13 @@ $script:state = 'offline'; $script:status = $null; $script:phase = 0.0
 $script:task = $null; $script:anchorRight = $null; $script:anchorBottom = $null
 
 function Open-Eve {
+  # The server opens Eve's app window (same Edge/Chrome profile as at startup); browser tab if that fails.
+  if (Post-Eve '/api/open-window') { return }
   try { if ($Browser) { Start-Process $Browser "http://localhost:$Port" } else { Start-Process "http://localhost:$Port" } }
   catch { Start-Process "http://localhost:$Port" }
 }
 function Post-Eve($route) {
-  try { $wc = New-Object System.Net.WebClient; $wc.Headers.Add('Content-Type', 'application/json'); [void]$wc.UploadString("$base$route", 'POST', '{}') } catch {}
+  try { $wc = New-Object System.Net.WebClient; $wc.Headers.Add('Content-Type', 'application/json'); [void]$wc.UploadString("$base$route", 'POST', '{}'); return $true } catch { return $false }
 }
 
 function Apply-State {

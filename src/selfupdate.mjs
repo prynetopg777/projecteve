@@ -62,12 +62,17 @@ export function syntaxCheck() {
     for (const f of fs.readdirSync(path.join(ROOT, dir))) if (f.endsWith('.mjs')) check(path.join(ROOT, dir, f));
   }
   const html = fs.readFileSync(path.join(ROOT, 'public/index.html'), 'utf8');
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
-  if (script) {
-    const tmp = path.join(DATA_DIR, 'page-check.js');
-    fs.writeFileSync(tmp, script.replace('/*CONFIG*/', '{}'));
-    check(tmp, 'public/index.html <script>');
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  if (!scripts.length) errors.push('public/index.html: no <script> block found');
+  scripts.forEach((script, i) => {
+    const tmp = path.join(DATA_DIR, `page-check-${i}.js`);
+    fs.writeFileSync(tmp, script.replace('/*CONFIG*/', () => '{}'));
+    check(tmp, `public/index.html <script> #${i + 1}`);
     fs.rmSync(tmp, { force: true });
+  });
+  // A half-finished UI rewrite can be valid JS yet missing the app logic entirely.
+  for (const needed of ['/*CONFIG*/', "new EventSource('/events')", 'function showPermission']) {
+    if (!html.includes(needed)) errors.push(`public/index.html: missing \`${needed}\`; the UI would not work`);
   }
   return errors;
 }

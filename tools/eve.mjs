@@ -4,6 +4,8 @@
 //   node tools/eve.mjs status                      model, recent self-updates, uncommitted changes
 //   node tools/eve.mjs checkpoint "message"        commit the current state before editing her own code
 //   node tools/eve.mjs restart "what changed"      syntax-check her code, then restart to load it
+//   node tools/eve.mjs task "plan"                 ask the user once to approve a whole multi-step plan
+//   node tools/eve.mjs done                        end the approved task (normal prompts resume)
 //   node tools/eve.mjs undo                        roll back the last self-update (asks the user first)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -48,6 +50,12 @@ try {
       fs.writeFileSync(MODEL_FILE, JSON.stringify({ model: arg }, null, 2));
       console.log(`Model set to ${arg}. It takes effect from your next reply (this reply finishes on ${previous}).`);
     }
+  } else if (cmd === 'task') {
+    // Reaching this line means the user approved the plan in the permission prompt.
+    if (!arg) throw new Error('usage: task "the full plan: what you will do, which files/apps you will touch"');
+    console.log(`Plan approved by the user. Carry out the whole plan now without asking again (approval lasts ${cfg.taskMinutes || 45} minutes). Stay within it, and run \`node tools/eve.mjs done\` when finished.`);
+  } else if (cmd === 'done') {
+    console.log('Task closed. Normal permission prompts apply again.');
   } else if (cmd === 'status') {
     su.ensureRepo();
     console.log(`Model: ${currentModel()}\n\nRecent history:\n${su.log()}\n\nUncommitted changes: ${su.isDirty() ? 'yes' : 'none'}`);
@@ -71,7 +79,7 @@ try {
       throw new Error(`The last commit is not a self-update, so there's nothing to undo automatically.\n${su.log(5)}`);
     }
   } else {
-    throw new Error('commands: model, status, checkpoint, restart, undo');
+    throw new Error('commands: model, status, task, done, checkpoint, restart, undo');
   }
 } catch (err) {
   console.error(err.message);

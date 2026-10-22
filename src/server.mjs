@@ -1,7 +1,6 @@
 // Local web server: serves the voice UI, relays brain events over SSE, fires reminders,
 // brokers permission requests, and reports status to the desktop overlay.
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -10,6 +9,7 @@ import { loadConfig, ROOT } from './config.mjs';
 import { startReminderLoop } from './reminders.mjs';
 import * as su from './selfupdate.mjs';
 import { speak } from './speak.mjs';
+import { openWindow } from './window.mjs';
 
 const cfg = loadConfig();
 const brain = new Brain(cfg);
@@ -29,6 +29,7 @@ brain.on('tool', ({ name, input, sub }) => broadcast({ type: 'tool', name, sub, 
 brain.on('done', (text) => broadcast({ type: 'done', text }));
 brain.on('error', (err) => broadcast({ type: 'error', message: err.message }));
 brain.on('model', (model) => broadcast({ type: 'model', model }));
+brain.on('task', (task, reason) => broadcast({ type: 'task', task, reason }));
 brain.on('permission-resolved', (ev) => broadcast({ type: 'permission-resolved', ...ev }));
 brain.on('permission', (req) => {
   console.log(`🔐 Asking permission to ${req.title}`);
@@ -70,7 +71,7 @@ if (fs.existsSync(su.PENDING_FILE)) {
 function restart() {
   console.log('♻️  Restarting to load updated code…');
   broadcast({ type: 'restarting' });
-  brain.stop();
+  brain.stop({ keepTask: true }); // an approved plan carries on after a self-restart
   setTimeout(() => process.exit(75), 300); // 75 = "restart me" for the launcher
 }
 
@@ -111,7 +112,8 @@ function status() {
   const ui = clients.size ? uiState : 'idle';
   const state = pending ? 'permission' : ui === 'speaking' || ui === 'listening' ? ui : brain.busy ? 'thinking' : 'idle';
   const reminder = reminderFlash && reminderFlash.until > Date.now() ? reminderFlash.text : null;
-  return { state, busy: brain.busy, model: brain.runningModel || brain.model, clients: clients.size, pending, reminder };
+  const task = brain.taskActive ? brain.task : null;
+  return { state, busy: brain.busy, model: brain.runningModel || brain.model, clients: clients.size, pending, reminder, task };
 }
 
 const routes = {
@@ -148,6 +150,7 @@ const routes = {
   'POST /api/restart': (req, res) => {
     if (!supervised) return json(res, 409, { error: 'Eve is not running under the launcher, so she cannot restart herself. Ask the user to restart start-eve.bat.' });
     restartRequested = true;
+    brain.holdTask = true; // keep an approved plan through the restart
     json(res, 200, { ok: true });
     if (!brain.busy) restart();
   },
@@ -156,6 +159,10 @@ const routes = {
     console.log('👋 Shutting down.');
     brain.stop();
     setTimeout(() => process.exit(0), 200);
+  },
+  'POST /api/open-window': (req, res) => {
+    openWindow(cfg, `http://localhost:${cfg.port}`); // double-click on the desktop overlay
+    json(res, 200, { ok: true });
   },
   'GET /api/status': (req, res) => json(res, 200, status()),
 };
@@ -168,12 +175,12 @@ const server = http.createServer(async (req, res) => {
     const html = readPage();
     const pageCfg = { wakeWord: cfg.wakeWord, wakeAliases: cfg.wakeAliases, wakeReplies: cfg.wakeReplies, voice: cfg.voice, honorific: cfg.honorific, uiHash: pageHash(html) };
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-    return res.end(html.replace('/*CONFIG*/', JSON.stringify(pageCfg)));
+    return res.end(html.replace('/*CONFIG*/', () => JSON.stringify(pageCfg)));
   }
 
   if (req.method === 'GET' && url.pathname === '/events') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    const hello = { type: 'hello', uiHash: pageHash(), model: brain.runningModel || brain.model, busy: brain.busy, pending: brain.pendingPermissions };
+    const hello = { type: 'hello', uiHash: pageHash(), model: brain.runningModel || brain.model, busy: brain.busy, pending: brain.pendingPermissions, task: brain.taskActive ? brain.task : null };
     res.write(`data: ${JSON.stringify(hello)}\n\n`);
     clients.add(res);
     const ping = setInterval(() => res.write(': ping\n\n'), 25000);
@@ -197,8 +204,8 @@ server.listen(cfg.port, '127.0.0.1', () => {
   brain.start(); // warm up the Claude process so the first answer is fast
   const firstStart = !process.env.EVE_RESTARTED;
   if (firstStart && cfg.openBrowser && !process.env.EVE_NO_BROWSER && process.platform === 'win32') {
-    const args = cfg.browser ? ['/c', 'start', '', cfg.browser, url] : ['/c', 'start', '', url];
-    spawn('cmd', args, { windowsHide: true, stdio: 'ignore' });
+    // Give a window left open from a previous run a moment to reconnect, so we don't open a second one.
+    setTimeout(() => clients.size || openWindow(cfg, url), 3500);
   }
 });
 

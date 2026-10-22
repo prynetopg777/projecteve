@@ -6,123 +6,248 @@
 <title>E.V.E.</title>
 <style>
   :root {
-    --bg: #04070d;
-    --panel: rgba(10, 22, 38, .72);
-    --line: rgba(80, 200, 255, .18);
-    --cyan: #4fd8ff;
-    --cyan-dim: #2a7fa3;
-    --text: #d6ecf7;
-    --muted: #6f8ea3;
+    --bg: #02050b;
+    --bg2: #061224;
+    --glass: rgba(12, 28, 48, .52);
+    --glass-hi: rgba(20, 44, 72, .55);
+    --line: rgba(90, 220, 255, .16);
+    --line-hi: rgba(90, 230, 255, .42);
+    --cyan: #38e8ff;
+    --teal: #2dffc4;
+    --cyan-dim: #2a8fb3;
+    --text: #d9f1fb;
+    --muted: #6f93a8;
     --amber: #ffb547;
+    --violet: #b98cff;
     --red: #ff5a6a;
+    --green: #7dffc0;
+    --accent: var(--cyan);
+    --radius: 18px;
     color-scheme: dark;
   }
+  body[data-state="listening"] { --accent: var(--teal); }
+  body[data-state="thinking"] { --accent: var(--amber); }
+  body[data-state="speaking"] { --accent: var(--violet); }
+  body[data-state="permission"] { --accent: var(--amber); }
+
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
-    background: radial-gradient(ellipse at 50% 0%, #0b1d33 0%, var(--bg) 60%) fixed;
+    background:
+      radial-gradient(ellipse 80% 55% at 50% -10%, #0c2a48 0%, transparent 70%),
+      radial-gradient(ellipse 60% 40% at 50% 110%, #062033 0%, transparent 70%),
+      linear-gradient(180deg, var(--bg2), var(--bg)) fixed;
     color: var(--text);
-    font: 15px/1.5 "Segoe UI", system-ui, sans-serif;
+    font: 14.5px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
     display: grid;
     grid-template-rows: auto 1fr auto;
-    max-width: 920px;
+    max-width: 960px;
     margin: 0 auto;
-    padding: 0 16px;
+    padding: 0 14px;
+    overflow: hidden;
   }
-  header { display: flex; align-items: center; justify-content: space-between; padding: 14px 0 6px; }
-  .brand { letter-spacing: .4em; font-weight: 600; color: var(--cyan); font-size: 13px; }
-  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
-  button {
-    font: inherit; font-size: 13px; color: var(--text); cursor: pointer;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px;
-    transition: border-color .2s, color .2s, background .2s;
+  /* Faint HUD grid + scanlines behind everything */
+  body::before, body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1; }
+  body::before {
+    background-image: linear-gradient(rgba(80, 210, 255, .045) 1px, transparent 1px), linear-gradient(90deg, rgba(80, 210, 255, .045) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse at 50% 30%, #000 0%, transparent 75%);
+    animation: drift 40s linear infinite;
   }
-  button:hover { border-color: var(--cyan-dim); }
-  button.on { border-color: var(--cyan); color: var(--cyan); background: rgba(79, 216, 255, .08); }
+  body::after { background: repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0 1px, transparent 1px 3px); }
+  @keyframes drift { to { background-position: 44px 44px, 44px 44px; } }
 
-  main { display: flex; flex-direction: column; min-height: 0; }
+  ::selection { background: rgba(56, 232, 255, .3); }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: rgba(90, 220, 255, .18); border-radius: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
 
-  /* Arc reactor */
-  .reactor-wrap { display: flex; flex-direction: column; align-items: center; padding: 10px 0 4px; }
-  .reactor { position: relative; width: 150px; height: 150px; cursor: pointer; }
-  .ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid transparent; }
-  .r1 { border-top-color: var(--cyan); border-bottom-color: var(--cyan); animation: spin 8s linear infinite; opacity: .7; }
-  .r2 { inset: 16px; border-left-color: var(--cyan); border-right-color: var(--cyan); animation: spin 5s linear infinite reverse; opacity: .55; }
-  .r3 { inset: 32px; border: 1px dashed var(--cyan-dim); animation: spin 14s linear infinite; }
-  .core {
-    position: absolute; inset: 52px; border-radius: 50%;
-    background: radial-gradient(circle, #e8fbff 0%, var(--cyan) 35%, rgba(79,216,255,0) 72%);
-    box-shadow: 0 0 30px var(--cyan); opacity: .55; transition: opacity .3s, transform .3s;
+  /* Header */
+  header {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px;
+    margin-top: 12px; padding: 9px 12px 9px 16px;
+    background: var(--glass); border: 1px solid var(--line); border-radius: var(--radius);
+    backdrop-filter: blur(14px) saturate(140%);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .04);
   }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes pulse { 50% { transform: scale(1.18); opacity: 1; } }
-  body[data-state="listening"] .core { opacity: .95; animation: pulse 1.1s ease-in-out infinite; }
-  body[data-state="thinking"] .r1 { animation-duration: 1.2s; }
-  body[data-state="thinking"] .r2 { animation-duration: .8s; }
-  body[data-state="thinking"] .core { opacity: .8; }
-  body[data-state="speaking"] .core { opacity: 1; animation: pulse .45s ease-in-out infinite; }
-  .state { margin-top: 8px; font-size: 12px; letter-spacing: .25em; text-transform: uppercase; color: var(--muted); min-height: 18px; }
-  .interim { font-style: italic; color: var(--muted); min-height: 22px; text-align: center; padding: 0 8px; }
-
-  /* Transcript */
-  .log {
-    flex: 1; overflow-y: auto; min-height: 0; padding: 8px 4px 16px;
-    display: flex; flex-direction: column; gap: 10px;
-    mask-image: linear-gradient(to bottom, transparent 0, #000 24px);
+  .brand { display: flex; align-items: center; letter-spacing: .42em; font-weight: 600; font-size: 13px; color: var(--cyan); text-shadow: 0 0 12px rgba(56, 232, 255, .65); }
+  .brand::before {
+    content: ""; width: 8px; height: 8px; border-radius: 50%; margin-right: 12px;
+    background: var(--accent); box-shadow: 0 0 10px var(--accent), 0 0 3px var(--accent);
+    animation: blink 2.4s ease-in-out infinite; transition: background .4s, box-shadow .4s;
   }
-  .msg { max-width: 85%; padding: 9px 14px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .msg.user { align-self: flex-end; background: rgba(79, 216, 255, .12); border: 1px solid rgba(79,216,255,.25); }
-  .msg.eve { align-self: flex-start; background: var(--panel); border: 1px solid var(--line); }
-  .msg.reminder { align-self: center; color: var(--amber); border: 1px solid rgba(255,181,71,.4); background: rgba(255,181,71,.08); }
-  .msg.error { align-self: center; color: var(--red); border: 1px solid rgba(255,90,106,.4); font-size: 13px; }
-  .tool { align-self: flex-start; font: 12px/1.4 Consolas, monospace; color: var(--muted); padding-left: 6px; overflow-wrap: anywhere; }
-  .tool::before { content: "⚙ "; color: var(--cyan-dim); }
-  .msg.system { align-self: center; color: var(--muted); font-size: 13px; border: 1px dashed var(--line); }
-  .model { margin-left: 10px; font-size: 10px; letter-spacing: .15em; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; text-transform: uppercase; }
+  @keyframes blink { 50% { opacity: .35; } }
+  .model { margin-left: 4px; font-size: 9.5px; letter-spacing: .18em; color: var(--muted); text-shadow: none; border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; text-transform: uppercase; font-weight: 500; }
   .model:empty { display: none; }
-  body[data-state="permission"] .core { background: radial-gradient(circle, #fff3dc 0%, var(--amber) 35%, rgba(255,181,71,0) 72%); box-shadow: 0 0 30px var(--amber); opacity: 1; animation: pulse .8s ease-in-out infinite; }
+  .controls { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  button {
+    font: inherit; font-size: 12.5px; color: var(--text); cursor: pointer;
+    background: rgba(10, 26, 44, .6); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px;
+    transition: border-color .2s, color .2s, background .2s, box-shadow .2s, transform .1s;
+  }
+  button:hover { border-color: var(--line-hi); background: var(--glass-hi); box-shadow: 0 0 14px rgba(56, 232, 255, .15); }
+  button:active { transform: scale(.97); }
+  button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
+  button.on { border-color: rgba(56, 232, 255, .65); color: var(--cyan); background: rgba(56, 232, 255, .09); box-shadow: 0 0 12px rgba(56, 232, 255, .22), inset 0 0 10px rgba(56, 232, 255, .08); }
+
+  main { display: flex; flex-direction: column; min-height: 0; gap: 10px; padding-top: 6px; }
+
+  /* Orb */
+  .stage { display: flex; flex-direction: column; align-items: center; flex: none; position: relative; }
+  .reactor {
+    position: relative; width: clamp(150px, 30vh, 250px); aspect-ratio: 1; cursor: pointer;
+    border-radius: 50%; transition: transform .25s;
+  }
+  .reactor:hover { transform: scale(1.025); }
+  .reactor canvas { position: absolute; inset: -14%; width: 128%; height: 128%; }
+  /* HUD corner brackets */
+  .reactor::before, .reactor::after {
+    content: ""; position: absolute; inset: -6%; pointer-events: none; opacity: .5;
+    border: 1px solid var(--accent); transition: border-color .5s;
+    -webkit-mask: linear-gradient(#000 0 0) top left / 16% 16% no-repeat, linear-gradient(#000 0 0) top right / 16% 16% no-repeat,
+                  linear-gradient(#000 0 0) bottom left / 16% 16% no-repeat, linear-gradient(#000 0 0) bottom right / 16% 16% no-repeat;
+  }
+  .reactor::after { inset: -9%; opacity: .18; border-radius: 50%; border-style: dashed; -webkit-mask: none; animation: spin 30s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .wave { width: min(420px, 92%); height: 40px; display: block; margin-top: 4px; }
+  .state {
+    margin-top: 2px; font-size: 11px; letter-spacing: .38em; text-transform: uppercase; min-height: 18px;
+    color: var(--accent); text-shadow: 0 0 10px var(--accent); transition: color .4s; padding-left: .38em;
+  }
+  body[data-state="idle"] .state { color: var(--muted); text-shadow: none; }
+  body[data-state="permission"] .state { animation: blink 1s ease-in-out infinite; }
+  .interim { font-style: italic; color: var(--teal); opacity: .85; min-height: 22px; text-align: center; padding: 0 12px; font-size: 14px; }
+
+  /* Transcript panel */
+  .panel {
+    flex: 1; min-height: 0; display: flex; flex-direction: column;
+    background: var(--glass); border: 1px solid var(--line); border-radius: var(--radius);
+    backdrop-filter: blur(14px) saturate(140%);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, .4), inset 0 1px 0 rgba(255, 255, 255, .04);
+    overflow: hidden;
+  }
+  .panel-head {
+    display: flex; align-items: center; gap: 10px; padding: 8px 16px; flex: none;
+    font-size: 10px; letter-spacing: .32em; text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--line);
+  }
+  .panel-head::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--line-hi), transparent); }
+  .log {
+    flex: 1; overflow-y: auto; min-height: 0; padding: 12px 14px 16px;
+    display: flex; flex-direction: column; gap: 10px;
+    mask-image: linear-gradient(to bottom, transparent 0, #000 18px);
+  }
+  .log > * { animation: rise .35s cubic-bezier(.2, .8, .2, 1) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+  .msg { max-width: 86%; padding: 9px 14px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg.user {
+    align-self: flex-end; border-bottom-right-radius: 4px;
+    background: linear-gradient(135deg, rgba(56, 232, 255, .16), rgba(45, 255, 196, .08));
+    border: 1px solid rgba(56, 232, 255, .3);
+  }
+  .msg.eve {
+    align-self: flex-start; border-bottom-left-radius: 4px; position: relative;
+    background: rgba(8, 20, 36, .7); border: 1px solid var(--line);
+    box-shadow: inset 2px 0 0 rgba(56, 232, 255, .55);
+  }
+  .msg.reminder { align-self: center; color: var(--amber); border: 1px solid rgba(255,181,71,.4); background: rgba(255,181,71,.08); box-shadow: 0 0 18px rgba(255,181,71,.12); }
+  .msg.error { align-self: center; color: var(--red); border: 1px solid rgba(255,90,106,.4); background: rgba(255,90,106,.06); font-size: 13px; }
+  .msg.system { align-self: center; color: var(--muted); font-size: 13px; border: 1px dashed var(--line); }
+  .tool { align-self: flex-start; font: 11.5px/1.4 "Cascadia Code", Consolas, monospace; color: var(--muted); padding-left: 6px; overflow-wrap: anywhere; opacity: .85; }
+  .tool::before { content: "⚙ "; color: var(--cyan-dim); }
 
   /* Permission request card */
-  .perm { align-self: stretch; border: 1px solid rgba(255,181,71,.45); background: rgba(255,181,71,.06); border-radius: 14px; padding: 10px 14px; }
+  .perm {
+    align-self: stretch; border: 1px solid rgba(255,181,71,.5); background: rgba(255,181,71,.06); border-radius: 14px; padding: 10px 14px;
+    box-shadow: 0 0 22px rgba(255,181,71,.12), inset 0 0 18px rgba(255,181,71,.04);
+  }
   .perm-title { color: var(--amber); font-weight: 600; }
   .perm pre { max-height: 180px; }
   .perm-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
-  .perm-actions .allow { border-color: rgba(92,255,176,.5); color: #7dffc0; }
+  .perm-actions .allow, .perm-actions .always { border-color: rgba(92,255,176,.5); color: var(--green); }
+  .perm-actions .allow:hover, .perm-actions .always:hover { box-shadow: 0 0 14px rgba(92,255,176,.25); }
   .perm-actions .deny { border-color: rgba(255,90,106,.5); color: var(--red); }
+  .perm-actions .deny:hover { box-shadow: 0 0 14px rgba(255,90,106,.25); }
   .perm-hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
-  .perm.done { opacity: .6; }
+  .perm.task pre { white-space: pre-wrap; font-family: inherit; font-size: 13.5px; color: var(--text); }
+  .taskchip { margin-left: 8px; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--green, #5cffb0); border: 1px solid rgba(92,255,176,.45); border-radius: 999px; padding: 2px 8px; cursor: help; animation: blink 2s ease-in-out infinite; }
+  .taskchip[hidden] { display: none; }
+  .perm.done { opacity: .55; box-shadow: none; }
   .perm-result { margin-top: 6px; font-size: 13px; color: var(--muted); }
-  .banner { display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; margin: 6px 0; padding: 8px 12px; border: 1px solid var(--cyan-dim); border-radius: 12px; font-size: 13px; }
-  pre { background: #020409; border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow-x: auto; white-space: pre; font: 13px/1.45 Consolas, monospace; margin: 6px 0; }
+  .banner {
+    display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; padding: 8px 12px; font-size: 13px;
+    border: 1px solid var(--line-hi); border-radius: 12px; background: rgba(56, 232, 255, .07); box-shadow: 0 0 18px rgba(56, 232, 255, .12);
+  }
+  .banner[hidden] { display: none; }
+  pre { background: rgba(1, 4, 9, .85); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; overflow-x: auto; white-space: pre; font: 12.5px/1.5 "Cascadia Code", Consolas, monospace; margin: 6px 0; color: #bfe9f7; }
 
   /* Input */
-  form { display: flex; gap: 8px; padding: 10px 0 calc(14px + env(safe-area-inset-bottom, 0px)); }
+  form { display: flex; gap: 8px; padding: 10px 0 calc(12px + env(safe-area-inset-bottom, 0px)); }
   input[type=text] {
     flex: 1; min-width: 0; font: inherit; color: var(--text);
-    background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 10px 16px; outline: none;
+    background: var(--glass); border: 1px solid var(--line); border-radius: 999px; padding: 11px 18px; outline: none;
+    backdrop-filter: blur(14px); transition: border-color .2s, box-shadow .2s;
   }
-  input[type=text]:focus { border-color: var(--cyan-dim); }
-  .mic { width: 44px; height: 44px; padding: 0; display: grid; place-items: center; flex: none; }
+  input[type=text]::placeholder { color: var(--muted); }
+  input[type=text]:focus { border-color: var(--line-hi); box-shadow: 0 0 0 3px rgba(56, 232, 255, .08), 0 0 18px rgba(56, 232, 255, .12); }
+  .mic {
+    width: 46px; height: 46px; padding: 0; display: grid; place-items: center; flex: none;
+    color: var(--cyan); border-color: rgba(56, 232, 255, .4);
+    background: radial-gradient(circle, rgba(56, 232, 255, .16), rgba(10, 26, 44, .6) 70%);
+  }
   .mic svg { width: 20px; height: 20px; fill: currentColor; }
+  body[data-state="listening"] .mic { color: var(--teal); border-color: var(--teal); box-shadow: 0 0 0 0 rgba(45, 255, 196, .5); animation: ring 1.4s ease-out infinite; }
+  @keyframes ring { to { box-shadow: 0 0 0 12px rgba(45, 255, 196, 0); } }
 
   /* Boot overlay (browsers need a click before audio/mic) */
   .boot {
-    position: fixed; inset: 0; display: grid; place-items: center; background: rgba(2, 5, 10, .92); z-index: 10;
+    position: fixed; inset: 0; display: grid; place-items: center; z-index: 10;
+    background: radial-gradient(circle at 50% 45%, rgba(8, 30, 52, .9), rgba(1, 3, 8, .97) 70%);
+    backdrop-filter: blur(6px);
   }
-  .boot button { font-size: 16px; padding: 14px 32px; letter-spacing: .2em; border-color: var(--cyan); color: var(--cyan); }
-  .boot p { color: var(--muted); text-align: center; font-size: 13px; margin-top: 14px; }
+  .boot > div { display: flex; flex-direction: column; align-items: center; }
+  .boot-orb {
+    width: 120px; height: 120px; border-radius: 50%; margin-bottom: 30px; position: relative;
+    background: radial-gradient(circle, #eafcff 0%, var(--cyan) 22%, rgba(56, 232, 255, .15) 55%, transparent 70%);
+    box-shadow: 0 0 60px rgba(56, 232, 255, .35); animation: breathe 3s ease-in-out infinite;
+  }
+  .boot-orb::before { content: ""; position: absolute; inset: -18px; border-radius: 50%; border: 1px solid rgba(56, 232, 255, .35); border-top-color: transparent; border-bottom-color: transparent; animation: spin 6s linear infinite; }
+  @keyframes breathe { 50% { transform: scale(1.08); box-shadow: 0 0 90px rgba(56, 232, 255, .5); } }
+  .boot button {
+    font-size: 14px; padding: 13px 34px; letter-spacing: .3em; border-color: var(--cyan); color: var(--cyan);
+    background: rgba(56, 232, 255, .06); box-shadow: 0 0 24px rgba(56, 232, 255, .25), inset 0 0 14px rgba(56, 232, 255, .1);
+  }
+  .boot button:hover { background: rgba(56, 232, 255, .14); box-shadow: 0 0 34px rgba(56, 232, 255, .45), inset 0 0 14px rgba(56, 232, 255, .15); }
+  .boot p { color: var(--muted); text-align: center; font-size: 13px; margin-top: 16px; }
+
+  /* Wide windows: orb on the left, transcript on the right */
+  @media (min-width: 860px) and (min-height: 520px) {
+    body { max-width: 1180px; }
+    main { display: grid; grid-template-columns: minmax(300px, 1fr) 1.25fr; grid-template-rows: auto 1fr; gap: 14px; }
+    .banner { grid-column: 1 / -1; }
+    .stage { grid-column: 1; grid-row: 2; justify-content: center; }
+    .reactor { width: clamp(200px, 42vh, 320px); }
+    .panel { grid-column: 2; grid-row: 2; }
+    form { max-width: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; }
+  }
 </style>
 </head>
 <body data-state="idle">
   <div class="boot" id="boot">
     <div>
+      <div class="boot-orb"></div>
       <button id="bootBtn">INITIALIZE E.V.E.</button>
       <p id="bootNote">Allow microphone access when asked.</p>
     </div>
   </div>
 
   <header>
-    <div class="brand">E.V.E.<span class="model" id="model" title="Claude model Eve is currently using"></span></div>
+    <div class="brand">E.V.E.<span class="model" id="model" title="Claude model Eve is currently using"></span><span class="taskchip" id="taskChip" hidden>● Working on approved plan</span></div>
     <div class="controls">
       <button id="wakeBtn" title="Listen continuously for the wake word">Wake word</button>
       <button id="muteBtn" title="Turn spoken replies on/off">Voice on</button>
@@ -133,14 +258,16 @@
 
   <main>
     <div class="banner" id="banner" hidden>Eve updated her interface. <button id="reloadBtn">Reload</button></div>
-    <div class="reactor-wrap">
-      <div class="reactor" id="reactor" title="Click to talk">
-        <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div><div class="core"></div>
-      </div>
+    <div class="stage">
+      <div class="reactor" id="reactor" title="Click to talk"><canvas id="orb"></canvas></div>
+      <canvas class="wave" id="wave"></canvas>
       <div class="state" id="state">standby</div>
       <div class="interim" id="interim"></div>
     </div>
-    <div class="log" id="log"></div>
+    <section class="panel">
+      <div class="panel-head">Transcript</div>
+      <div class="log" id="log"></div>
+    </section>
   </main>
 
   <form id="form" autocomplete="off">
@@ -151,6 +278,122 @@
   </form>
 
 <script>
+// ---------- Visuals: animated orb + waveform (purely cosmetic; reads body[data-state]) ----------
+const fx = (() => {
+  const palette = { // r, g, b, energy, spin speed
+    idle:       [56, 232, 255, .10, .25],
+    listening:  [45, 255, 196, .45, .6],
+    thinking:   [255, 181, 71, .30, 2.4],
+    speaking:   [185, 140, 255, .60, .9],
+    permission: [255, 170, 60, .40, .5],
+  };
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const orb = document.getElementById('orb'), wave = document.getElementById('wave');
+  const oc = orb.getContext('2d'), wc = wave.getContext('2d');
+  const cur = [...palette.idle];
+  let boost = 0, t = 0, last = performance.now();
+  const sparks = Array.from({ length: 36 }, () => ({ a: Math.random() * 6.28, r: .55 + Math.random() * .4, s: .3 + Math.random() * .9, z: Math.random() }));
+
+  function fit(c) {
+    const dpr = Math.min(devicePixelRatio || 1, 2), w = c.clientWidth * dpr, h = c.clientHeight * dpr;
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  }
+  const rgba = (a) => `rgba(${cur[0] | 0},${cur[1] | 0},${cur[2] | 0},${a})`;
+
+  function drawOrb(state) {
+    fit(orb);
+    const W = orb.width, H = orb.height, cx = W / 2, cy = H / 2, R = Math.min(W, H) * .39 / 1.28 * 1.28 * .82;
+    const e = cur[3] + boost;
+    oc.clearRect(0, 0, W, H);
+    oc.globalCompositeOperation = 'lighter';
+
+    // Outer glow
+    let g = oc.createRadialGradient(cx, cy, R * .2, cx, cy, R * 1.6);
+    g.addColorStop(0, rgba(.28 + e * .25)); g.addColorStop(.45, rgba(.08 + e * .08)); g.addColorStop(1, rgba(0));
+    oc.fillStyle = g; oc.fillRect(0, 0, W, H);
+
+    // Rotating segmented rings
+    oc.lineCap = 'round';
+    [[1.18, 1, 3, 1.6], [1.05, -1.6, 5, 1], [.93, 2.3, 2, 2.2]].forEach(([k, dir, segs, lw], i) => {
+      const rot = t * cur[4] * dir * .6 + i;
+      oc.strokeStyle = rgba(.55 - i * .1); oc.lineWidth = lw * (W / 300);
+      oc.shadowColor = rgba(.9); oc.shadowBlur = 10 * (W / 300);
+      for (let s = 0; s < segs; s++) {
+        const a0 = rot + (s / segs) * Math.PI * 2, len = (Math.PI * 2 / segs) * (.55 + .2 * Math.sin(t * .8 + s + i));
+        oc.beginPath(); oc.arc(cx, cy, R * k, a0, a0 + len); oc.stroke();
+      }
+    });
+    oc.shadowBlur = 0;
+
+    // Tick marks on the outer ring
+    oc.strokeStyle = rgba(.25); oc.lineWidth = W / 400;
+    for (let i = 0; i < 72; i++) {
+      const a = (i / 72) * Math.PI * 2 - t * .05, r0 = R * 1.28, r1 = R * (i % 6 ? 1.31 : 1.35);
+      oc.beginPath(); oc.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); oc.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); oc.stroke();
+    }
+
+    // Orbiting sparks (dense and fast while thinking)
+    const sparkAlpha = state === 'thinking' ? .9 : state === 'idle' ? .25 : .5;
+    for (const p of sparks) {
+      p.a += .004 * p.s * cur[4] * 3;
+      const rr = R * (p.r + .08 * Math.sin(t * p.s + p.z * 6)), x = cx + Math.cos(p.a) * rr, y = cy + Math.sin(p.a) * rr * (.9 + .1 * p.z);
+      oc.fillStyle = rgba(sparkAlpha * (.4 + .6 * p.z)); oc.beginPath(); oc.arc(x, y, (1 + p.z * 1.6) * (W / 300), 0, 7); oc.fill();
+    }
+
+    // Liquid core: a circle deformed by layered sines; amplitude follows energy
+    const coreR = R * (.52 + e * .1), pts = 96;
+    for (let layer = 0; layer < 3; layer++) {
+      oc.beginPath();
+      for (let i = 0; i <= pts; i++) {
+        const a = (i / pts) * Math.PI * 2;
+        const d = Math.sin(a * 3 + t * 1.7 + layer) * .5 + Math.sin(a * 5 - t * 2.3 + layer * 2) * .3 + Math.sin(a * 2 + t * .9) * .2;
+        const r = coreR * (1 - layer * .14) * (1 + d * e * .22);
+        const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+        i ? oc.lineTo(x, y) : oc.moveTo(x, y);
+      }
+      g = oc.createRadialGradient(cx, cy - coreR * .2, 0, cx, cy, coreR * 1.1);
+      g.addColorStop(0, `rgba(240,253,255,${.55 - layer * .12})`); g.addColorStop(.35, rgba(.5 - layer * .1)); g.addColorStop(1, rgba(.04));
+      oc.fillStyle = g; oc.fill();
+    }
+    oc.globalCompositeOperation = 'source-over';
+  }
+
+  function drawWave(state) {
+    fit(wave);
+    const W = wave.width, H = wave.height, mid = H / 2, e = cur[3] + boost;
+    wc.clearRect(0, 0, W, H);
+    wc.globalCompositeOperation = 'lighter';
+    [[1, .9, 2], [.6, .45, 1.2], [.35, .25, 1]].forEach(([amp, alpha, lw], k) => {
+      wc.beginPath();
+      for (let x = 0; x <= W; x += 3) {
+        const u = x / W, env = Math.sin(u * Math.PI) ** 2; // fade out at both ends
+        const y = mid + env * H * .42 * amp * Math.min(1, e * 1.3) *
+          (Math.sin(u * 18 + t * (3 + k) + k) * .6 + Math.sin(u * 41 - t * 5.3 + k * 2) * .3 + Math.sin(u * 7 + t * 1.3) * .4);
+        x ? wc.lineTo(x, y) : wc.moveTo(x, y);
+      }
+      wc.strokeStyle = rgba(alpha); wc.lineWidth = lw * Math.min(devicePixelRatio || 1, 2);
+      wc.shadowColor = rgba(1); wc.shadowBlur = 8; wc.stroke();
+    });
+    wc.shadowBlur = 0; wc.globalCompositeOperation = 'source-over';
+  }
+
+  function frame(now) {
+    const dt = Math.min(.05, (now - last) / 1000); last = now;
+    const state = document.body.dataset.state || 'idle', target = palette[state] || palette.idle;
+    for (let i = 0; i < 5; i++) cur[i] += (target[i] - cur[i]) * Math.min(1, dt * 4); // smooth colour/energy transitions
+    if (state === 'speaking' || state === 'listening') boost += (Math.random() - .5) * .04;
+    boost = Math.max(0, boost * Math.pow(.04, dt));
+    t += dt * (reduced ? .25 : 1);
+    drawOrb(state); drawWave(state);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  return { kick: (amount = .3) => { boost = Math.min(.6, boost + amount); } };
+})();
+</script>
+
+<script>
+// ---------- App logic: speech, server connection, permissions ----------
 const CFG = /*CONFIG*/;
 const $ = (id) => document.getElementById(id);
 const log = $('log');
@@ -248,6 +491,7 @@ function onDelta(text) {
     replyEl = addMsg('eve', ''); replyText = ''; spokenLen = 0;
   }
   replyText += text;
+  fx.kick(.12);
   renderReply(replyEl, replyText);
   // Speak each finished sentence as soon as it arrives.
   const clean = speakable(replyText);
@@ -265,13 +509,14 @@ events.onmessage = (e) => {
   const ev = JSON.parse(e.data);
   switch (ev.type) {
     case 'hello':
-      busy = ev.busy; setModel(ev.model);
+      busy = ev.busy; setModel(ev.model); setTask(ev.task);
       if (ev.uiHash !== CFG.uiHash) $('banner').hidden = false;
       for (const id of [...perms.keys()]) if (!ev.pending.some((p) => p.id === id)) resolvePermission(id, 'cancelled');
       ev.pending.forEach(showPermission);
       render();
       break;
     case 'model': setModel(ev.model); break;
+    case 'task': setTask(ev.task); if (!ev.task && ev.reason === 'done') addMsg('system', '✓ Task finished. Normal permission prompts are back.'); break;
     case 'permission': showPermission(ev); break;
     case 'permission-resolved': resolvePermission(ev.id, ev.decision); break;
     case 'restarting': replyEl = null; addMsg('system', '♻ Restarting to load my updates. Back in a moment.'); break;
@@ -291,6 +536,12 @@ events.onmessage = (e) => {
 };
 
 function setModel(m) { $('model').textContent = m || ''; }
+// While an approved plan is running, show it in the header (hover for the full plan).
+function setTask(task) {
+  const chip = $('taskChip');
+  chip.hidden = !task;
+  if (task) chip.title = `Approved plan (until ${new Date(task.until).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}):\n${task.plan}\n\nPress Stop to withdraw approval.`;
+}
 
 // ---------- Permission requests ----------
 function showPermission(req) {
@@ -305,7 +556,10 @@ function showPermission(req) {
   if (req.detail) { const pre = document.createElement('pre'); pre.textContent = req.detail; el.append(pre); }
   const row = document.createElement('div');
   row.className = 'perm-actions';
-  for (const [label, decision] of [['Allow', 'allow'], ['Allow for this session', 'always'], ['Deny', 'deny']]) {
+  const isTask = req.kind === 'task';
+  if (isTask) { el.classList.add('task'); title.textContent = '🔐 May I go ahead with this plan? I won\'t ask again until it\'s done.'; }
+  const choices = isTask ? [['Approve plan', 'allow'], ['Deny', 'deny']] : [['Allow', 'allow'], ['Allow for this session', 'always'], ['Deny', 'deny']];
+  for (const [label, decision] of choices) {
     const b = document.createElement('button');
     b.textContent = label; b.className = decision;
     b.onclick = () => answerPermission(req.id, decision);
@@ -321,7 +575,8 @@ function showPermission(req) {
   render();
   chime(740);
   const hon = CFG.honorific.charAt(0).toUpperCase() + CFG.honorific.slice(1);
-  say(`${hon}, may I ${req.title}?`);
+  say(isTask ? `${hon}, shall I go ahead with the plan? Just say yes and I'll handle the rest.` : `${hon}, may I ${req.title}?`);
+  el.dataset.kind = req.kind || 'action';
 }
 function resolvePermission(id, decision) {
   const el = perms.get(id);
@@ -331,7 +586,10 @@ function resolvePermission(id, decision) {
   el.querySelector('.perm-hint')?.remove();
   const result = document.createElement('div');
   result.className = 'perm-result';
-  result.textContent = { allow: '✓ Allowed', always: '✓ Allowed for this session', deny: '✕ Denied', cancelled: '— Cancelled' }[decision] || decision;
+  const labels = el.dataset.kind === 'task'
+    ? { allow: '✓ Plan approved. Eve will handle the rest.', deny: '✕ Plan declined', cancelled: '— Cancelled' }
+    : { allow: '✓ Allowed', always: '✓ Allowed for this session', deny: '✕ Denied', cancelled: '— Cancelled' };
+  result.textContent = labels[decision] || decision;
   el.querySelector('.perm-actions').replaceWith(result);
   render();
 }
@@ -484,5 +742,3 @@ $('bootBtn').onclick = async () => {
 if (!SR) $('bootNote').textContent = 'Voice input needs Edge or Chrome. Text chat works everywhere.';
 updateButtons();
 </script>
-</body>
-</html>
