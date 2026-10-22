@@ -90,6 +90,8 @@ export class Brain extends EventEmitter {
       '--verbose',
       '--include-partial-messages',
       '--strict-mcp-config',
+      '--disable-slash-commands', // skip the skills listing: a smaller prompt means a faster first token
+      '--effort', this.runningModel === 'opus' ? 'high' : 'low', // quick replies for everyday chat; Opus keeps its depth
       '--model', this.runningModel,
       '--append-system-prompt', persona,
       '--allowedTools', this.cfg.autoAllow.join(','),
