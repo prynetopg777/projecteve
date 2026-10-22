@@ -2,6 +2,7 @@
 // Files live in data/piper: piper/piper.exe and voice.onnx (+ voice.onnx.json).
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { DATA_DIR } from './config.mjs';
 
@@ -18,11 +19,15 @@ let chain = Promise.resolve(); // one synthesis at a time keeps CPU use low
 export function synthesize(text) {
   const run = () =>
     new Promise((resolve, reject) => {
-      const p = spawn(EXE, ['-m', MODEL, '--output_file', '-', '--length_scale', '0.95', '--quiet'], { cwd: path.dirname(EXE), windowsHide: true });
-      const out = [];
-      p.stdout.on('data', (c) => out.push(c));
+      // Piper's stdout is text mode on Windows and turns every 0x0A byte into 0x0D 0x0A, which wrecks the audio. Use a file.
+      const tmp = path.join(os.tmpdir(), `eve-tts-${process.pid}-${Date.now()}.wav`);
+      const p = spawn(EXE, ['-m', MODEL, '--output_file', tmp, '--length_scale', '0.95', '--quiet'], { cwd: path.dirname(EXE), windowsHide: true });
       p.on('error', reject);
-      p.on('close', (code) => (code === 0 && out.length ? resolve(Buffer.concat(out)) : reject(new Error(`piper exited ${code}`))));
+      p.on('close', (code) => {
+        try { const wav = fs.readFileSync(tmp); fs.unlinkSync(tmp); code === 0 && wav.length ? resolve(wav) : reject(new Error(`piper exited ${code}`)); }
+        catch (e) { reject(e); }
+      });
+      p.stdout.resume();
       p.stdin.end(text.replace(/\s+/g, ' ').trim().slice(0, MAX_CHARS) + '\n');
     });
   const next = chain.then(run, run);
