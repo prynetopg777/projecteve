@@ -8,6 +8,7 @@
   "wakeReplies": ["Yes, {honorific}?", "I'm here.", "How can I help?", "Listening.", "At your service, {honorific}."],
   "speechPauseMs": 1800,
   "voice": "",
+  "tts": "browser",
   "overlay": true,
   "taskMinutes": 45,
   "autoRefresh": true,
