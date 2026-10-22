@@ -105,3 +105,36 @@ src/launcher.mjs supervises the server: restarts and crash rollback
 | `extraDirs` | Folders Eve may access besides `workspace/` (default: your home folder) |
 
 The server only accepts requests from `localhost`, and it rejects requests from other websites.
+
+## Requirements and limitations
+
+- **Windows 10/11 only.** The overlay, Windows speech fallback and shortcut tooling use PowerShell.
+- **Node 20+**, the **Claude Code CLI** signed in to your account, and **Microsoft Edge** (or Chrome) for speech recognition.
+- **Cost:** Eve has no API key; every turn uses your own Claude plan. Run `node tools/usage.mjs` for a per-day token summary. Haiku for chat and sonnet by default keep this low; opus is only used for heavy work.
+- **Voice:** uses your browser's voices, so how she sounds depends on the machine. Edge's "Online (Natural)" voices are best. Set `"voice"` to choose one.
+- **Language:** `speechLang` defaults to `fil-PH` so Filipino, English and Taglish all work, at the cost of occasionally odd English spellings. Set `"speechLang": "en-US"` for cleaner English-only recognition.
+- **Connectors (MCP)** are experimental. Only services that support automatic OAuth client registration sign in with one click; others (for example GitHub's hosted server) need a pre-made token.
+- **Auto mode** skips approval prompts. Shutdown, disk wiping, uninstalling, registry deletions and edits to `permissions.mjs` / `config.json` still ask, and shell or file actions after reading web content always prompt.
+
+## Tests
+
+```
+npm test
+```
+
+Covers the permission rules and reminder parsing. Run it after any change to `src/permissions.mjs`.
+
+## What makes Eve different
+
+Most voice assistants either run in the cloud with no control over your PC, or run local commands with no guardrails. Eve is:
+
+- **Self-improving, safely:** she edits her own code only with your approval, syntax-checks it, and rolls back automatically if it crashes.
+- **Permission-aware in software:** rules are enforced in code, not just in a prompt, and she asks once per task instead of once per step.
+- **Transparent:** a usage log shows exactly what each conversation costs.
+
+## Memory, skills and browsing
+
+- **Searchable memory:** `tools/memory.mjs` stores events and details in a local SQLite database (`data/memory.db`, full-text search). Eve searches it before answering questions about your past or plans. Needs Node 22+.
+- **Skills:** drop a `.md` recipe into `workspace/skills/` and Eve follows it when a request matches.
+- **Browser automation:** the `browser` connector runs Playwright MCP so Eve can open and operate web pages. Every connector tool asks permission on first use.
+- **Setup:** run `powershell -File setup.ps1` to check requirements, run tests and create the shortcut.

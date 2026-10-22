@@ -13,6 +13,7 @@
     "chat": "node src/cli.mjs",
     "remind": "node tools/remind.mjs",
     "eve": "node tools/eve.mjs",
+    "test": "node --test test/*.test.mjs",
     "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/create-shortcut.ps1"
   }
 }

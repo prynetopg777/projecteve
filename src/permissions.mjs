@@ -18,6 +18,7 @@ const EVE_TOOL = path.join(ROOT, 'tools/eve.mjs');
 const OWN_TOOLS = {
   [path.join(ROOT, 'tools/remind.mjs')]: null, // every subcommand
   [path.join(ROOT, 'tools/watch.mjs')]: null,
+  [path.join(ROOT, 'tools/memory.mjs')]: null,
   [EVE_TOOL]: new Set(['model', 'status', 'checkpoint', 'restart', 'done']),
 };
 
