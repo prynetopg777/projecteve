@@ -18,6 +18,8 @@ const MODEL_FILE = path.join(DATA_DIR, 'model.json'); // written by tools/eve.mj
 const BRIEFING_FILE = path.join(DATA_DIR, 'briefing.json'); // { date } of the last morning offer
 export const MODELS = ['haiku', 'sonnet', 'opus'];
 const PERMISSION_TIMEOUT_MS = 3 * 60 * 1000;
+const USAGE_FILE = path.join(DATA_DIR, 'usage.jsonl'); // one line per turn; summarised by tools/usage.mjs
+const WEB_TOOLS = new Set(['WebFetch', 'WebSearch']);
 
 export class Brain extends EventEmitter {
   constructor(cfg) {
@@ -67,7 +69,7 @@ export class Brain extends EventEmitter {
     // Switching on also approves whatever is waiting right now (unless it's on the always-ask list).
     if (this.autoMode) {
       for (const [id, p] of [...this.pending]) {
-        if (p.req.id && isAutoAllowed(p.req.tool, p.input, { taskActive: true })) this.respond(id, 'allow');
+        if (p.req.id && isAutoAllowed(p.req.tool, p.input, { taskActive: true, webTainted: !!this.turn?.webTainted })) this.respond(id, 'allow');
       }
     }
   }
@@ -131,6 +133,8 @@ export class Brain extends EventEmitter {
 
     const proc = this.proc;
     readline.createInterface({ input: proc.stdout }).on('line', (line) => this.#onLine(line));
+    // Writing to a CLI that just died raises EPIPE on stdin; the 'exit' handler below deals with the death.
+    proc.stdin.on('error', () => {});
     let stderr = '';
     proc.stderr.on('data', (d) => (stderr += d).length > 4000 && (stderr = stderr.slice(-4000)));
     // Ignore exits of processes we killed on purpose (stop / model switch): they're no longer this.proc.
@@ -138,6 +142,7 @@ export class Brain extends EventEmitter {
     proc.on('exit', (code) => {
       if (this.proc !== proc) return;
       this.proc = null;
+      this.#clearPending(); // nobody is left to answer them
       // A stale/deleted session makes --resume fail on startup; drop it so the next try starts fresh.
       if (code && /session|conversation/i.test(stderr) && this.sessionId) {
         this.sessionId = null;
@@ -254,6 +259,10 @@ export class Brain extends EventEmitter {
     const proc = this.proc;
     this.proc = null;
     proc.kill();
+    this.#clearPending();
+  }
+
+  #clearPending() {
     for (const [id, p] of this.pending) {
       clearTimeout(p.timer);
       this.emit('permission-resolved', { id, decision: 'cancelled' });
@@ -294,6 +303,7 @@ export class Brain extends EventEmitter {
     } else if (msg.type === 'assistant') {
       if (!msg.parent_tool_use_id && msg.message?.usage) turn.usage = msg.message.usage; // latest prompt size
       for (const block of msg.message?.content || []) {
+        if (block.type === 'tool_use' && WEB_TOOLS.has(block.name)) turn.webTainted = true;
         if (block.type === 'tool_use') this.emit('tool', { name: block.name, input: block.input, sub: !!msg.parent_tool_use_id });
       }
     } else if (msg.type === 'result') {
@@ -304,6 +314,7 @@ export class Brain extends EventEmitter {
       if (this.cfg.autoRefresh !== false && (tokens >= (this.cfg.refreshTokens || 60000) || ++this.turns >= (this.cfg.refreshTurns || 40))) {
         this.refreshDue = true;
       }
+      logUsage(this.runningModel, msg.usage);
       setImmediate(() => this.#maybeRefresh()); // after this turn settles; skipped if another turn already started
       // A plan approval covers one reply. The exception is a self-restart, after which the plan may carry on.
       if (!this.holdTask) this.endTask('done');
@@ -331,7 +342,10 @@ export class Brain extends EventEmitter {
     }
     const { tool_name: tool, input, description } = request;
     if (isTaskDone(tool, input)) this.endTask('done');
-    if (isAutoAllowed(tool, input, { grants: this.grants, taskActive: this.autoMode || this.taskActive, taskPlan: this.task?.plan })) {
+    if (this.turn && WEB_TOOLS.has(tool)) this.turn.webTainted = true;
+    // After reading the web this turn, auto mode / the task approval no longer cover shell or file actions.
+    const webTainted = !!this.turn?.webTainted;
+    if (isAutoAllowed(tool, input, { grants: this.grants, taskActive: this.autoMode || this.taskActive, taskPlan: this.task?.plan, webTainted })) {
       this.pending.set(id, { req: {}, input });
       return this.respond(id, 'allow');
     }
@@ -371,6 +385,20 @@ function saveRecent(user, reply) {
     fs.writeFileSync(RECENT_FILE, `${RECENT_HEADER}\n## ${kept.join('\n## ')}`);
   } catch {
     // best effort: never break a reply over the log
+  }
+}
+
+// Token usage of a whole turn (all API calls in it), appended to data/usage.jsonl.
+function logUsage(model, u = {}) {
+  try {
+    const input = u.input_tokens || 0;
+    const cacheRead = u.cache_read_input_tokens || 0;
+    const cacheCreation = u.cache_creation_input_tokens || 0;
+    const output = u.output_tokens || 0;
+    const entry = { ts: new Date().toISOString(), model, input, cache_read: cacheRead, cache_creation: cacheCreation, output, total: input + cacheRead + cacheCreation + output };
+    fs.appendFileSync(USAGE_FILE, JSON.stringify(entry) + '\n');
+  } catch {
+    // best effort
   }
 }
 

@@ -26,21 +26,29 @@ export function load() {
   }
 }
 export const save = (list) => fs.writeFileSync(FILE, JSON.stringify(list, null, 2));
+// Read-modify-write against the file as it is right now, so concurrent adds/removes (tools/watch.mjs
+// vs. the server's poll loop) aren't lost.
+function update(fn) {
+  const list = load();
+  const next = fn(list);
+  save(next);
+  return next;
+}
 
 export function add({ type, target = '', text = '', message = '', everyMs = 60000, repeat = false }) {
   if (!TYPES[type]) throw new Error(`Unknown type "${type}". Types: ${Object.keys(TYPES).join(', ')}`);
-  const list = load();
-  const id = Math.max(0, ...list.map((w) => w.id)) + 1;
-  const w = { id, type, target, text, message, everyMs: Math.max(10000, everyMs), repeat, nextCheck: 0, lastFired: 0, state: null };
-  list.push(w);
-  save(list);
+  let w;
+  update((list) => {
+    const id = Math.max(0, ...list.map((x) => x.id)) + 1;
+    w = { id, type, target, text, message, everyMs: Math.max(10000, everyMs), repeat, nextCheck: 0, lastFired: 0, state: null };
+    return [...list, w];
+  });
   return w;
 }
 export function remove(id) {
-  const list = load();
-  const next = list.filter((w) => w.id !== id);
-  save(next);
-  return next.length !== list.length;
+  let found = false;
+  update((list) => list.filter((w) => (w.id === id ? !(found = true) : true)));
+  return found;
 }
 
 const run = (cmd, args) => new Promise((resolve) => execFile(cmd, args, { windowsHide: true, timeout: 15000 }, (e, out) => resolve(String(out || ''))));
@@ -94,6 +102,8 @@ async function check(w) {
   }
 }
 
+const pick = ({ nextCheck, lastFired, state }) => ({ nextCheck, lastFired, state });
+
 /** Poll watchers and call onFire({ id, text }) for each one that triggers. Returns a stop function. */
 export function startWatcherLoop(onFire, tickMs = 10000) {
   let busy = false;
@@ -120,7 +130,14 @@ export function startWatcherLoop(onFire, tickMs = 10000) {
           onFire({ id: w.id, text: w.message || alert });
         }
       }
-      if (list.length) save(list.filter((w) => w.repeat || !fired.includes(w)));
+      // Checks can take a while: merge our results into the file as it is now (by id), keeping watchers
+      // added meanwhile and not resurrecting ones removed meanwhile.
+      if (list.length) {
+        const mine = new Map(list.map((w) => [w.id, w]));
+        update((current) => current
+          .map((w) => (mine.has(w.id) ? { ...w, ...pick(mine.get(w.id)) } : w))
+          .filter((w) => w.repeat || !fired.some((f) => f.id === w.id)));
+      }
     } finally {
       busy = false;
     }

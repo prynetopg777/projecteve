@@ -7,7 +7,6 @@ import { DATA_DIR, loadConfig, ROOT } from './config.mjs';
 import * as su from './selfupdate.mjs';
 
 const RESTART_CODE = 75;
-const HEALTHY_AFTER_MS = 30000;
 const cfg = loadConfig();
 let restarts = 0;
 let crashes = [];
@@ -49,8 +48,13 @@ function run() {
     if (code === 0 || signal) process.exit(0);
 
     // Crashed. If that was freshly self-updated code, roll it back.
-    if (fs.existsSync(su.PENDING_FILE) && Date.now() - started < HEALTHY_AFTER_MS) {
-      const { reason } = JSON.parse(fs.readFileSync(su.PENDING_FILE, 'utf8'));
+    if (fs.existsSync(su.PENDING_FILE) && Date.now() - started < su.HEALTHY_AFTER_MS) {
+      let reason = 'self-update';
+      try {
+        ({ reason } = JSON.parse(fs.readFileSync(su.PENDING_FILE, 'utf8')));
+      } catch {
+        // corrupt marker: still roll back, with a generic reason
+      }
       const stash = `eve: crashed self-update ${new Date().toISOString()}`;
       try {
         su.stash(stash);

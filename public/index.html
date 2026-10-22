@@ -516,7 +516,9 @@ const isFilipino = (text) => (text.match(FIL_WORDS) || []).length >= Math.max(2,
 function pickVoice() {
   const voices = speechSynthesis.getVoices();
   const want = (CFG.voice || '').toLowerCase();
-  voice = (want && voices.find((v) => v.name.toLowerCase().includes(want)))
+  const saved = localStorage.getItem('eveVoice'); // chosen by voice command ("change voice"); exact name
+  voice = (saved && voices.find((v) => v.name === saved))
+    || (want && voices.find((v) => v.name.toLowerCase().includes(want)))
     || voices.find((v) => /Natural/i.test(v.name) && /en-GB/i.test(v.lang) && /Sonia|Libby|Maisie|Hollie|Bella/i.test(v.name))
     || voices.find((v) => /Natural/i.test(v.name) && /^en/i.test(v.lang) && /Aria|Jenny|Ava|Emma|Michelle|Natasha/i.test(v.name))
     || voices.find((v) => /^en/i.test(v.lang) && /Hazel|Susan|Zira|Samantha|Serena|Kate|Female/i.test(v.name))
@@ -526,6 +528,44 @@ function pickVoice() {
     || voices.find((v) => /^(fil|tl)/i.test(v.lang)) || null;
 }
 speechSynthesis.onvoiceschanged = pickVoice; pickVoice();
+
+// Voice picker, by voice or typing: "list voices", "change voice" (next one), "change voice to Jenny",
+// "default voice". English voices only, "Natural" ones first. The choice is remembered in localStorage.
+const VOICE_CMD = /^(?:(?:eve|eva|evie)[,\s]+)?(?:please\s+)?(list (?:the )?voices|(?:change|switch|next) (?:your |the )?voice(?:\s+to\s+(.+?))?|(?:default|original|reset) voice|reset (?:your |the )?voice)[.!?]?$/i;
+function englishVoices() {
+  const vs = speechSynthesis.getVoices().filter((v) => /^en/i.test(v.lang));
+  return [...vs.filter((v) => /Natural/i.test(v.name)), ...vs.filter((v) => !/Natural/i.test(v.name))];
+}
+const shortVoiceName = (v) => v.name.replace(/^Microsoft\s+/i, '').replace(/\s+Online.*$|\s*\(.*$|\s+-\s+.*$/g, '');
+function voiceCommand(text) {
+  const m = text.trim().match(VOICE_CMD);
+  if (!m) return false;
+  const vs = englishVoices();
+  const reply = (t) => { addMsg('eve', t); say(t); };
+  if (/^list/i.test(m[1])) {
+    addMsg('eve', '```\n' + (vs.map((v, i) => `${i + 1}. ${v.name}${v === voice ? '  (current)' : ''}`).join('\n') || 'No voices found.') + '\n```');
+    say(`I have ${vs.length} English voices. Say "change voice to" and a name, ${CFG.honorific}.`);
+    return true;
+  }
+  if (/^(default|original|reset)/i.test(m[1])) {
+    localStorage.removeItem('eveVoice'); pickVoice();
+    reply('Back to my usual voice.');
+    return true;
+  }
+  if (!vs.length) { reply("I couldn't find any other voices."); return true; }
+  let next;
+  if (m[2]) {
+    const q = m[2].toLowerCase().trim();
+    next = vs.find((v) => shortVoiceName(v).toLowerCase() === q) || vs.find((v) => v.name.toLowerCase().includes(q))
+      || vs[Number(q.replace(/^number\s+/, '')) - 1];
+    if (!next) { reply(`I don't have a voice called ${m[2]}. Say "list voices" to see them.`); return true; }
+  } else {
+    next = vs[(vs.indexOf(voice) + 1) % vs.length];
+  }
+  localStorage.setItem('eveVoice', next.name); pickVoice();
+  reply(`How's this, ${CFG.honorific}? This is ${shortVoiceName(next)}.`);
+  return true;
+}
 
 let ttsPending = 0;
 // What Eve said recently, so the mic (which stays on while she talks) can ignore her own voice.
@@ -565,7 +605,11 @@ async function playNext() {
   };
   const blob = await it.blob;
   if (it.gen !== ttsGen) return; // the user cut her off meanwhile
-  if (!blob) { ttsPending--; sayBrowser(it.text, it.onEnd); return playNext(); }
+  // No local audio: speak this sentence with the browser voice, and only move on when it has finished.
+  if (!blob) {
+    ttsPending--;
+    return sayBrowser(it.text, () => { it.onEnd?.(); if (it.gen === ttsGen) playNext(); });
+  }
   const url = URL.createObjectURL(blob), a = new Audio(url);
   curAudio = a;
   a.onended = a.onerror = () => { URL.revokeObjectURL(url); curAudio = null; if (it.gen === ttsGen) finish(); };
@@ -734,6 +778,7 @@ async function send(text) {
   if (!text) return;
   if (answerByVoice(text)) return;
   shutUp();
+  if (voiceCommand(text)) return; // handled right here, no round trip to Claude
   lastSent = text;
   convoRearm(10 * 60000); // stays open while she works; re-armed to 30s once she finishes speaking
   addMsg('user', text);

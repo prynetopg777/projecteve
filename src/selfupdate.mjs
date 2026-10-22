@@ -6,6 +6,12 @@ import { DATA_DIR, ROOT } from './config.mjs';
 
 export const PENDING_FILE = path.join(DATA_DIR, 'pending-update.json'); // restarted after an edit, not yet proven healthy
 export const FAILED_FILE = path.join(DATA_DIR, 'update-failed.json'); // last update crashed and was rolled back
+// A crash this soon after a self-update rolls it back (launcher); the server commits only after this has passed.
+export const HEALTHY_AFTER_MS = 30000;
+export const COMMIT_AFTER_MS = HEALTHY_AFTER_MS + 5000;
+// Only Eve's own code and settings are staged/stashed, never unrelated files lying around.
+const CODE_PATHS = ['src', 'tools', 'public', 'prompts', 'overlay', 'workspace', 'config.json', 'package.json', 'README.md', 'start-eve.bat'];
+const codePaths = () => CODE_PATHS.filter((p) => fs.existsSync(path.join(ROOT, p)));
 
 const git = (...args) => execFileSync('git', ['-C', ROOT, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
@@ -19,13 +25,14 @@ export function ensureRepo() {
   }
 }
 
-export const isDirty = () => git('status', '--porcelain') !== '';
+export const isDirty = () => git('status', '--porcelain', '--', ...codePaths()) !== '';
 
-/** Commit everything (data/ and memory are gitignored). Returns the short hash, or null if nothing changed. */
+/** Commit changes to Eve's code (CODE_PATHS; data/ and memory are gitignored). Returns the short hash, or null if nothing changed. */
 export function commit(message) {
   ensureRepo();
   if (!isDirty()) return null;
-  git('add', '-A');
+  git('add', '-A', '--', ...codePaths());
+  if (!git('diff', '--cached', '--name-only')) return null;
   git('commit', '-q', '-m', message);
   return git('rev-parse', '--short', 'HEAD');
 }
@@ -34,7 +41,7 @@ export function commit(message) {
 export function stash(message) {
   ensureRepo();
   if (!isDirty()) return false;
-  git('stash', 'push', '-u', '-m', message);
+  git('stash', 'push', '-u', '-m', message, '--', ...codePaths());
   return true;
 }
 

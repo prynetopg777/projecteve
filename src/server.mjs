@@ -61,22 +61,31 @@ startWatcherLoop((w) => {
 
 // ---- Self-update bookkeeping (see src/launcher.mjs and tools/eve.mjs) ----
 if (fs.existsSync(su.FAILED_FILE)) {
-  const f = JSON.parse(fs.readFileSync(su.FAILED_FILE, 'utf8'));
-  brain.note(`Your last self-update ("${f.reason}") crashed on startup and was rolled back (git stash "${f.stash}"). Error output:\n${f.error}\nTell the user briefly and apologise.`);
-  fs.rmSync(su.FAILED_FILE);
+  try {
+    const f = JSON.parse(fs.readFileSync(su.FAILED_FILE, 'utf8'));
+    brain.note(`Your last self-update ("${f.reason}") crashed on startup and was rolled back (git stash "${f.stash}"). Error output:\n${f.error}\nTell the user briefly and apologise.`);
+  } catch {
+    // corrupt file: just drop it
+  }
+  fs.rmSync(su.FAILED_FILE, { force: true });
 }
 if (fs.existsSync(su.PENDING_FILE)) {
   // Survived long enough: keep the update.
   setTimeout(() => {
     try {
-      const { reason } = JSON.parse(fs.readFileSync(su.PENDING_FILE, 'utf8'));
+      let reason = 'self-update';
+      try {
+        ({ reason } = JSON.parse(fs.readFileSync(su.PENDING_FILE, 'utf8')));
+      } catch {
+        // corrupt marker: commit with a generic message
+      }
       const hash = su.commit(`eve: self-update - ${reason}`);
-      fs.rmSync(su.PENDING_FILE);
+      fs.rmSync(su.PENDING_FILE, { force: true });
       console.log(`✅ Self-update committed${hash ? ` (${hash})` : ''}`);
     } catch (e) {
       console.error(`Could not commit self-update: ${e.message}`);
     }
-  }, 20000);
+  }, su.COMMIT_AFTER_MS); // only once the launcher's crash-rollback window has passed
 }
 
 function restart() {

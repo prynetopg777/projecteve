@@ -24,18 +24,32 @@ const OWN_TOOLS = {
 // Commands that only look at things. A command line is read-only if every piece of it
 // (split on ; && || |) starts with one of these and nothing writes to a file.
 const READ_ONLY =
-  /^(Get-[A-Za-z]+|Select-Object|Where-Object|Sort-Object|Format-(Table|List)|Measure-Object|Select-String|Test-Path|Resolve-Path|Split-Path|Join-Path|Out-String|ls|dir|pwd|cd|whoami|hostname|date|echo|cat|type|head|tail|wc|grep|findstr|find|where|which|tasklist|systeminfo|ipconfig|ping|nslookup|Test-Connection|Resolve-DnsName|Write-(Output|Host)|ConvertTo-(Json|Csv)|node\s+(-v|--version|--check)|npm\s+(-v|--version|ls|list)|git\s+(status|log|diff|show|branch|ls-files))\b/i;
-const WRITES = /(^|[^-])>|\$\(|`|\bOut-File\b|\bSet-Content\b|\bAdd-Content\b|\bTee-Object\b\b|\bfind\b.*-(delete|exec)/i;
+  /^(Get-[A-Za-z]+|Select-Object|Where-Object|Sort-Object|Format-(Table|List)|Measure-Object|Select-String|Test-Path|Resolve-Path|Split-Path|Join-Path|Out-String|ls|dir|pwd|cd|whoami|hostname|date|echo|cat|type|head|tail|wc|grep|findstr|find|where|which|tasklist|systeminfo|ipconfig|ping|nslookup|Test-Connection|Resolve-DnsName|Write-(Output|Host)|ConvertTo-(Json|Csv)|node\s+(-v|--version|--check)|npm\s+(-v|--version|ls|list)|git\s+(status|log|diff|show|branch|ls-files))(?=\s|$)/i;
+// Writers hidden inside otherwise read-only commands (redirects, git branch -d/-m/-c, --output=file, ...).
+const WRITES = /(^|[^-])>|\$\(|`|\bOut-File\b|\bSet-Content\b|\bAdd-Content\b|\bTee-Object\b|\bfind\b.*-(delete|exec)|--output\b|\s-(o|OutFile)\b|\bgit\s+branch\b.*\s(-[a-z]*[dDmMcCfu]|--(delete|move|copy|force|set-upstream-to|unset-upstream|edit-description))\b/i;
 
 // Opening an app, file or website: `Start-Process spotify`, `start https://...`, `Invoke-Item x.pdf`.
-const OPEN = /^(Start-Process(\s+-FilePath)?|start|Invoke-Item|ii|explorer(\.exe)?)\s+("[^"]+"|'[^']+'|[^\s;&|<>`$]+)(\s+-(ArgumentList|FilePath)\s+("[^"]+"|'[^']+'|[^\s;&|<>`$]+))?\s*$/i;
+// No arguments, and never an interpreter/shell (that would be running code, not opening something).
+const OPEN = /^(Start-Process(\s+-FilePath)?|start|Invoke-Item|ii|explorer(\.exe)?)\s+("[^"]+"|'[^']+'|[^\s;&|<>`$]+)\s*$/i;
+const INTERPRETER = /^(.*[\\/])?(powershell|pwsh|cmd|wscript|cscript|mshta|node|python[0-9.]*|py|pythonw|rundll32|regsvr32|bash|sh|wsl|msiexec|certutil|bitsadmin|schtasks|reg|wmic|conhost|forfiles|installutil|regasm|regsvcs|msbuild|hh)(\.(exe|com|cmd|bat))?$/i;
+const SCRIPT_FILE = /\.(bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|hta|msi|scr|py|lnk|reg|com|pif|cpl)$/i;
+function isOpen(cmd) {
+  const m = cmd.match(OPEN);
+  if (!m) return false;
+  const target = m[4].replace(/^["']|["']$/g, '').trim();
+  if (/^https?:\/\//i.test(target)) return true;
+  return !INTERPRETER.test(target) && !SCRIPT_FILE.test(target);
+}
 
 // Never covered by a task approval or a session grant: always shown to the user.
 const ALWAYS_ASK =
   /\b(shutdown|Stop-Computer|Restart-Computer|format(-Volume)?|diskpart|Clear-Disk|Initialize-Disk|bcdedit|reg\s+delete|Remove-ItemProperty|Set-ExecutionPolicy|cipher\s+\/w|vssadmin|Disable-|Uninstall-)|\brm\s+-[a-z]*r[a-z]*f?\s+(\/|~|[A-Za-z]:\\?)\s*$|Remove-Item\b.*-Recurse.*\s([A-Za-z]:\\?|~|\$env:USERPROFILE|\$HOME)\s*$/i;
 const PROTECTED_FILES = ['src/permissions.mjs', 'config.json', 'data/settings.json', 'data/task.json'].map((f) => path.join(ROOT, f));
-// Shell commands touching the permission state files are always shown too.
-const PROTECTED_SHELL = /\b(settings|task)\.json\b|permissions\.mjs|\/api\/(auto|permission)\b/i;
+// Shell commands touching the permission state files, config or her own source are always shown too.
+const PROTECTED_SHELL = /\b(settings|task|config)\.json\b|permissions\.mjs|(^|[\s"'\\/=])src[\\/]|\/api\/(auto|permission)\b/i;
+// Case-insensitive, forward-slash form of a path, for comparisons on Windows.
+const norm = (p) => path.resolve(WORKSPACE, p || '').replaceAll('\\', '/').toLowerCase();
+const PROTECTED_NORM = PROTECTED_FILES.map(norm);
 
 const stripQuotes = (cmd) => cmd.replace(/"[^"]*"|'[^']*'/g, '""');
 const isSimple = (cmd) => !/[;&|<>`$\n]/.test(stripQuotes(cmd));
@@ -51,7 +65,7 @@ function isReadOnly(cmd) {
 function isHarmlessChain(cmd) {
   const parts = cmd.split(/\s*(?:;|&&)\s*/).filter(Boolean);
   return parts.length > 1 && parts.every((p) =>
-    p.split('"').length % 2 === 1 && p.split("'").length % 2 === 1 && isSimple(p) && (OPEN.test(p) || isOwnTool(p) || isReadOnly(p)));
+    p.split('"').length % 2 === 1 && p.split("'").length % 2 === 1 && isSimple(p) && (isOpen(p) || isOwnTool(p) || isReadOnly(p)));
 }
 
 function parseOwnTool(cmd) {
@@ -106,6 +120,16 @@ const planNames = (file, plan) => {
   const p = String(plan || '').toLowerCase().replaceAll('\\', '/');
   return p.includes(rel) || p.includes(path.basename(rel));
 };
+const PLAN_UNLOCKABLE_NORM = PLAN_UNLOCKABLE.map(norm);
+// Paths in a shell command that the approved plan names: src/<file>, permissions.mjs, config.json.
+const SHELL_UNLOCKABLE = /(?:[\w.:\\/-]*[\\/])?src[\\/][\w.\\/-]+|permissions\.mjs|config\.json/gi;
+function stripPlanNamed(cmd, plan) {
+  if (!plan) return cmd;
+  return cmd.replace(SHELL_UNLOCKABLE, (m) => {
+    const rel = m.replaceAll('\\', '/').replace(/^.*?(?=src\/)/i, '');
+    return planNames(path.join(ROOT, rel.includes('/') ? rel : rel === 'permissions.mjs' ? 'src/permissions.mjs' : rel), plan) ? '' : m;
+  });
+}
 
 /** Actions that must be confirmed individually, unless the approved plan names the file. */
 export function alwaysAsk(tool, input = {}, plan = '') {
@@ -114,36 +138,43 @@ export function alwaysAsk(tool, input = {}, plan = '') {
     if (autoModeRequest(tool, input) === 'on') return true; // Eve can't put herself into auto mode
     if (autoModeRequest(tool, input)) return false; // `auto off` / `auto status` are always fine
     if (ALWAYS_ASK.test(cmd)) return true;
-    if (planNames(path.join(ROOT, 'src/permissions.mjs'), plan)) cmd = cmd.replace(/permissions\.mjs/gi, '');
-    return PROTECTED_SHELL.test(cmd) && !isReadOnly(cmd);
+    if (PROTECTED_SHELL.test(cmd) && isReadOnly(cmd)) return false;
+    cmd = stripPlanNamed(cmd, plan);
+    return PROTECTED_SHELL.test(cmd);
   }
   if (FILE_TOOLS.has(tool)) {
-    const file = path.resolve(WORKSPACE, input.file_path || '');
-    if (!PROTECTED_FILES.includes(file)) return false;
-    return !(PLAN_UNLOCKABLE.includes(file) && planNames(file, plan));
+    const raw = input.file_path || input.notebook_path || '';
+    const file = norm(raw);
+    if (!PROTECTED_NORM.includes(file)) return false;
+    return !(PLAN_UNLOCKABLE_NORM.includes(file) && planNames(path.resolve(WORKSPACE, raw), plan));
   }
   return false;
 }
 
 /** Key used for "allow for this session" grants. */
 export function grantKey(tool, input = {}) {
-  if (SHELLS.has(tool)) return `${tool}:${String(input.command || '').trim().split(/\s+/)[0]}`;
-  if (FILE_TOOLS.has(tool) && input.file_path) return `${tool}:${path.dirname(path.resolve(WORKSPACE, input.file_path))}`;
-  return tool;
+  // The whole command (whitespace-normalised): approving `git status` must not approve `git push --force`.
+  if (SHELLS.has(tool)) return `${tool}:${String(input.command || '').trim().replace(/\s+/g, ' ')}`;
+  const file = input.file_path || input.notebook_path;
+  if (FILE_TOOLS.has(tool) && file) return `${tool}:${norm(file)}`;
+  return `${tool}:${JSON.stringify(input)}`;
 }
 
 /**
- * @param {{ grants?: Set<string>, taskActive?: boolean }} ctx
+ * @param {{ grants?: Set<string>, taskActive?: boolean, taskPlan?: string, webTainted?: boolean }} ctx
+ * webTainted: Eve read web content this turn, so auto mode / task approval no longer cover shell or file
+ * actions (a page could have injected instructions); they get a normal prompt instead.
  */
-export function isAutoAllowed(tool, input = {}, { grants = new Set(), taskActive = false, taskPlan = '' } = {}) {
+export function isAutoAllowed(tool, input = {}, { grants = new Set(), taskActive = false, taskPlan = '', webTainted = false } = {}) {
   if (taskRequest(tool, input)) return false; // the task request itself is always shown
+  if (webTainted && (SHELLS.has(tool) || FILE_TOOLS.has(tool))) taskPlan = ''; // no plan unlocks either
   if (alwaysAsk(tool, input, taskPlan)) return false;
   if (autoModeRequest(tool, input)) return true; // `auto off` / `status` (`auto on` was caught above)
-  if (taskActive) return true;
+  if (taskActive && !(webTainted && (SHELLS.has(tool) || FILE_TOOLS.has(tool)))) return true;
   if (grants.has(grantKey(tool, input))) return true;
   if (SHELLS.has(tool)) {
     const cmd = String(input.command || '').trim();
-    return (isSimple(cmd) && (isOwnTool(cmd) || OPEN.test(cmd))) || isReadOnly(cmd) || isHarmlessChain(cmd);
+    return (isSimple(cmd) && (isOwnTool(cmd) || isOpen(cmd))) || isReadOnly(cmd) || isHarmlessChain(cmd);
   }
   // Her notes, memory and to-dos live in workspace/. Her own source code does NOT, so editing it needs approval.
   if (FILE_TOOLS.has(tool)) return inside(input.file_path || input.notebook_path || '', WORKSPACE);
