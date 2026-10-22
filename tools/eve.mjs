@@ -6,6 +6,7 @@
 //   node tools/eve.mjs restart "what changed"      syntax-check her code, then restart to load it
 //   node tools/eve.mjs task "plan"                 ask the user once to approve a whole multi-step plan
 //   node tools/eve.mjs done                        end the approved task (normal prompts resume)
+//   node tools/eve.mjs auto on|off|status           auto mode: act without permission prompts ("on" asks the user)
 //   node tools/eve.mjs undo                        roll back the last self-update (asks the user first)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -54,6 +55,16 @@ try {
     // Reaching this line means the user approved the plan in the permission prompt.
     if (!arg) throw new Error('usage: task "the full plan: what you will do, which files/apps you will touch"');
     console.log(`Plan approved by the user. Carry out the whole plan now without asking again (approval lasts ${cfg.taskMinutes || 45} minutes). Stay within it, and run \`node tools/eve.mjs done\` when finished.`);
+  } else if (cmd === 'auto') {
+    // `auto on` only runs after the user approved it in a permission prompt; `off` and `status` are always allowed.
+    const mode = (rest[0] || 'status').toLowerCase();
+    if (mode === 'on' || mode === 'off') {
+      const { auto } = await post('/api/auto', { on: mode === 'on' });
+      console.log(auto ? 'Auto mode is ON: act without asking (the always-ask list still prompts).' : 'Auto mode is OFF: normal permission prompts apply.');
+    } else {
+      const s = await fetch(`http://127.0.0.1:${cfg.port}/api/status`).then((r) => r.json()).catch(() => ({}));
+      console.log(`Auto mode: ${s.auto ? 'on' : 'off'}`);
+    }
   } else if (cmd === 'done') {
     console.log('Task closed. Normal permission prompts apply again.');
   } else if (cmd === 'status') {
@@ -79,7 +90,7 @@ try {
       throw new Error(`The last commit is not a self-update, so there's nothing to undo automatically.\n${su.log(5)}`);
     }
   } else {
-    throw new Error('commands: model, status, task, done, checkpoint, restart, undo');
+    throw new Error('commands: model, status, task, done, auto, checkpoint, restart, undo');
   }
 } catch (err) {
   console.error(err.message);

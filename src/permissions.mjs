@@ -32,7 +32,9 @@ const OPEN = /^(Start-Process|start|Invoke-Item|ii|explorer(\.exe)?)\s+("[^"]+"|
 // Never covered by a task approval or a session grant: always shown to the user.
 const ALWAYS_ASK =
   /\b(shutdown|Stop-Computer|Restart-Computer|format(-Volume)?|diskpart|Clear-Disk|Initialize-Disk|bcdedit|reg\s+delete|Remove-ItemProperty|Set-ExecutionPolicy|cipher\s+\/w|vssadmin|Disable-|Uninstall-)|\brm\s+-[a-z]*r[a-z]*f?\s+(\/|~|[A-Za-z]:\\?)\s*$|Remove-Item\b.*-Recurse.*\s([A-Za-z]:\\?|~|\$env:USERPROFILE|\$HOME)\s*$/i;
-const PROTECTED_FILES = ['src/permissions.mjs', 'src/brain.mjs', 'config.json'].map((f) => path.join(ROOT, f));
+const PROTECTED_FILES = ['src/permissions.mjs', 'src/brain.mjs', 'config.json', 'data/settings.json', 'data/task.json'].map((f) => path.join(ROOT, f));
+// Shell commands touching the permission state files are always shown too.
+const PROTECTED_SHELL = /\b(settings|task)\.json\b|permissions\.mjs|brain\.mjs|\/api\/(auto|permission)\b/i;
 
 const stripQuotes = (cmd) => cmd.replace(/"[^"]*"|'[^']*'/g, '""');
 const isSimple = (cmd) => !/[;&|<>`$\n]/.test(stripQuotes(cmd));
@@ -66,6 +68,16 @@ export function taskRequest(tool, input = {}) {
   return plan || '(no plan given)';
 }
 
+/** `node tools/eve.mjs auto on|off|status`: returns 'on' | 'off' | 'status', or null. */
+export function autoModeRequest(tool, input = {}) {
+  const cmd = String(input.command || '');
+  if (!SHELLS.has(tool) || !isSimple(cmd)) return null;
+  const t = parseOwnTool(cmd);
+  if (!t || t.script !== EVE_TOOL || t.sub !== 'auto') return null;
+  const m = cmd.match(/\bauto\s+(on|off|status)\s*$/i);
+  return m ? m[1].toLowerCase() : 'status';
+}
+
 /** `node tools/eve.mjs done`: Eve reports the approved task finished. */
 export function isTaskDone(tool, input = {}) {
   const t = SHELLS.has(tool) && isSimple(String(input.command || '')) && parseOwnTool(String(input.command));
@@ -79,7 +91,12 @@ const inside = (file, dir) => {
 
 /** Actions that must be confirmed individually even during an approved task. */
 export function alwaysAsk(tool, input = {}) {
-  if (SHELLS.has(tool)) return ALWAYS_ASK.test(String(input.command || ''));
+  if (SHELLS.has(tool)) {
+    const cmd = String(input.command || '');
+    if (autoModeRequest(tool, input) === 'on') return true; // Eve can't put herself into auto mode
+    if (autoModeRequest(tool, input)) return false; // `auto off` / `auto status` are always fine
+    return ALWAYS_ASK.test(cmd) || (PROTECTED_SHELL.test(cmd) && !isReadOnly(cmd));
+  }
   if (FILE_TOOLS.has(tool)) return PROTECTED_FILES.includes(path.resolve(WORKSPACE, input.file_path || ''));
   return false;
 }
@@ -97,6 +114,7 @@ export function grantKey(tool, input = {}) {
 export function isAutoAllowed(tool, input = {}, { grants = new Set(), taskActive = false } = {}) {
   if (taskRequest(tool, input)) return false; // the task request itself is always shown
   if (alwaysAsk(tool, input)) return false;
+  if (autoModeRequest(tool, input)) return true; // `auto off` / `status` (`auto on` was caught above)
   if (taskActive) return true;
   if (grants.has(grantKey(tool, input))) return true;
   if (SHELLS.has(tool)) {
@@ -118,6 +136,9 @@ const shortPath = (p) => {
 export function describe(tool, input = {}, description = '') {
   const plan = taskRequest(tool, input);
   if (plan) return { kind: 'task', title: 'go ahead with this plan', detail: plan };
+  if (autoModeRequest(tool, input) === 'on') {
+    return { kind: 'action', title: 'turn on auto mode, so I can act without asking you each time', detail: 'Auto mode: Eve acts without permission prompts until you turn it off.\nShutdown, disk wipes, registry deletes, uninstalls and edits to her permission code still ask.' };
+  }
   if (SHELLS.has(tool)) {
     const desc = input.description || description;
     return { kind: 'action', title: desc ? lcFirst(desc.replace(/\.$/, '')) : `run a ${tool} command`, detail: input.command };

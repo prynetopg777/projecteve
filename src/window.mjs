@@ -1,7 +1,7 @@
 // Opens Eve's UI as a standalone desktop window: Edge (or Chrome) in app mode with a dedicated
 // profile under data/, so microphone permission and window placement persist between runs.
 // Falls back to the default browser when no Chromium browser is found.
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './config.mjs';
@@ -21,8 +21,21 @@ export function findBrowser(cfg) {
   const key = want.toLowerCase().replace(/\.exe$/, '');
   const order = key === 'chrome' ? ['chrome', 'msedge'] : !key || key === 'msedge' || key === 'edge' ? ['msedge', 'chrome'] : [];
   for (const name of order) {
-    const exe = KNOWN[name].find((p) => fs.existsSync(p));
+    const exe = KNOWN[name].find((p) => fs.existsSync(p)) || appPath(name);
     if (exe) return exe;
+  }
+  return null;
+}
+
+// Installed somewhere unusual: Windows records the exe under "App Paths" in the registry.
+function appPath(name) {
+  for (const hive of ['HKCU', 'HKLM']) {
+    try {
+      const out = execFileSync('reg', ['query', `${hive}\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${name}.exe`, '/ve'],
+        { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      const exe = out.match(/REG_(?:EXPAND_)?SZ\s+(.+\.exe)/i)?.[1].trim().replace(/^"|"$/g, '');
+      if (exe && fs.existsSync(exe)) return exe;
+    } catch {}
   }
   return null;
 }
@@ -44,7 +57,8 @@ export function openWindow(cfg, url) {
   const exe = cfg.appWindow === false ? null : findBrowser(cfg);
   if (exe) {
     seedProfile(new URL(url).origin);
-    const args = [`--app=${url}`, `--user-data-dir=${PROFILE_DIR}`, '--window-size=480,820',
+    // ?app=1 tells the page it's in its own window (it can skip the "Initialize" click once the mic is allowed).
+    const args = [`--app=${new URL('/?app=1', url)}`, `--user-data-dir=${PROFILE_DIR}`, '--window-size=480,820',
       '--no-first-run', '--no-default-browser-check', '--autoplay-policy=no-user-gesture-required'];
     spawn(exe, args, { detached: true, stdio: 'ignore' }).on('error', () => openInBrowser(null, url)).unref();
     return;

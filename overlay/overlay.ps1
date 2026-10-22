@@ -51,8 +51,8 @@ function Open-Eve {
   try { if ($Browser) { Start-Process $Browser "http://localhost:$Port" } else { Start-Process "http://localhost:$Port" } }
   catch { Start-Process "http://localhost:$Port" }
 }
-function Post-Eve($route) {
-  try { $wc = New-Object System.Net.WebClient; $wc.Headers.Add('Content-Type', 'application/json'); [void]$wc.UploadString("$base$route", 'POST', '{}'); return $true } catch { return $false }
+function Post-Eve($route, $body = '{}') {
+  try { $wc = New-Object System.Net.WebClient; $wc.Headers.Add('Content-Type', 'application/json'); [void]$wc.UploadString("$base$route", 'POST', $body); return $true } catch { return $false }
 }
 
 function Apply-State {
@@ -64,11 +64,13 @@ function Apply-State {
   $glow.Color = $color
   $text = $st[1]
   if ($key -eq 'idle' -and $s -and $s.clients -eq 0) { $text = 'EVE - window closed' }
+  if ($key -eq 'idle' -and $s -and $s.auto) { $text = $text + ' - AUTO' }
   if ($s -and $s.reminder) { $text = 'Reminder: ' + $(if ($s.reminder.Length -gt 32) { $s.reminder.Substring(0, 32) + '...' } else { $s.reminder }) }
   $label.Text = $text
   $win.Opacity = $st[3]
   $model = if ($s) { $s.model } else { '?' }
-  $pill.ToolTip = "Eve - $key (model: $model)`nDouble-click to open, drag to move, right-click for options"
+  $auto = if ($s -and $s.auto) { ', auto mode ON' } else { '' }
+  $pill.ToolTip = "Eve - $key (model: $model$auto)`nDouble-click to open, drag to move, right-click for options"
 }
 
 # Keep the pill anchored to its bottom-right corner as its width changes.
@@ -95,7 +97,7 @@ $pill.Add_MouseLeftButtonDown({
 })
 
 $menu = New-Object System.Windows.Controls.ContextMenu
-foreach ($item in @(@('Open Eve', { Open-Eve }), @('Hide indicator', { $win.Close() }), @('Quit Eve', { Post-Eve '/api/quit' }))) {
+foreach ($item in @(@('Open Eve', { Open-Eve }), @('Toggle auto mode', { [void](Post-Eve '/api/auto' $(if ($script:status.auto) { '{"on":false}' } else { '{"on":true}' })) }), @('Hide indicator', { $win.Close() }), @('Quit Eve', { Post-Eve '/api/quit' }))) {
   $mi = New-Object System.Windows.Controls.MenuItem
   $mi.Header = $item[0]; $mi.Add_Click($item[1]); [void]$menu.Items.Add($mi)
 }
@@ -126,7 +128,7 @@ $poll.Add_Tick({
     return
   }
   if (-not $script:task.IsCompleted) { return }
-  $prev = "$($script:state)|$($script:status.clients)|$($script:status.reminder)|$($script:status.model)"
+  $prev = "$($script:state)|$($script:status.clients)|$($script:status.reminder)|$($script:status.model)|$($script:status.auto)"
   if ($script:task.Status -eq 'RanToCompletion') {
     $script:status = $script:task.Result | ConvertFrom-Json
     $script:state = $script:status.state
@@ -134,7 +136,7 @@ $poll.Add_Tick({
     $script:status = $null; $script:state = 'offline'
   }
   $script:task = $null
-  if ("$($script:state)|$($script:status.clients)|$($script:status.reminder)|$($script:status.model)" -ne $prev) { Apply-State }
+  if ("$($script:state)|$($script:status.clients)|$($script:status.reminder)|$($script:status.model)|$($script:status.auto)" -ne $prev) { Apply-State }
 })
 $poll.Start()
 

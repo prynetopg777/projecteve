@@ -9,7 +9,9 @@ npm start          # launcher: voice UI in Edge, desktop indicator, self-restart
 npm run chat       # text-only chat in the terminal
 ```
 
-Or double-click `start-eve.bat`.
+Or double-click `start-eve.bat`, or the **Eve** desktop shortcut (created on first start; recreate it with `npm run shortcut`).
+
+Eve opens in her own app window: Edge (or Chrome) in app mode with a dedicated profile in `data/browser-profile`, so the microphone permission and window position are remembered and she starts listening without the Initialize click. If neither browser is found she opens in your default browser. Set `"appWindow": false` to use a normal browser tab, or set `"browser"` to `chrome` or a path to a browser exe.
 
 Click **Initialize**, allow the microphone, then say **"Eve, what's the weather in Singapore?"**
 

@@ -30,6 +30,7 @@ brain.on('done', (text) => broadcast({ type: 'done', text }));
 brain.on('error', (err) => broadcast({ type: 'error', message: err.message }));
 brain.on('model', (model) => broadcast({ type: 'model', model }));
 brain.on('task', (task, reason) => broadcast({ type: 'task', task, reason }));
+brain.on('auto', (on) => { console.log(on ? '⚡ Auto mode ON: Eve acts without asking' : '🔐 Auto mode off'); broadcast({ type: 'auto', on }); });
 brain.on('permission-resolved', (ev) => broadcast({ type: 'permission-resolved', ...ev }));
 brain.on('permission', (req) => {
   console.log(`🔐 Asking permission to ${req.title}`);
@@ -113,7 +114,7 @@ function status() {
   const state = pending ? 'permission' : ui === 'speaking' || ui === 'listening' ? ui : brain.busy ? 'thinking' : 'idle';
   const reminder = reminderFlash && reminderFlash.until > Date.now() ? reminderFlash.text : null;
   const task = brain.taskActive ? brain.task : null;
-  return { state, busy: brain.busy, model: brain.runningModel || brain.model, clients: clients.size, pending, reminder, task };
+  return { state, busy: brain.busy, model: brain.runningModel || brain.model, clients: clients.size, pending, reminder, task, auto: brain.autoMode };
 }
 
 const routes = {
@@ -137,6 +138,11 @@ const routes = {
     const { state } = await readJson(req);
     if (['idle', 'listening', 'thinking', 'speaking'].includes(state)) uiState = state;
     json(res, 200, { ok: true });
+  },
+  'POST /api/auto': async (req, res) => {
+    const { on } = await readJson(req);
+    brain.setAutoMode(on);
+    json(res, 200, { ok: true, auto: brain.autoMode });
   },
   'POST /api/stop': (req, res) => {
     brain.stop();
@@ -180,8 +186,9 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/events') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    const hello = { type: 'hello', uiHash: pageHash(), model: brain.runningModel || brain.model, busy: brain.busy, pending: brain.pendingPermissions, task: brain.taskActive ? brain.task : null };
-    res.write(`data: ${JSON.stringify(hello)}\n\n`);
+    const hello = { type: 'hello', uiHash: pageHash(), model: brain.runningModel || brain.model, busy: brain.busy, pending: brain.pendingPermissions, task: brain.taskActive ? brain.task : null, auto: brain.autoMode };
+    // retry: reconnect quickly after a restart, well inside the "is a window already open?" wait below.
+    res.write(`retry: 1000\ndata: ${JSON.stringify(hello)}\n\n`);
     clients.add(res);
     const ping = setInterval(() => res.write(': ping\n\n'), 25000);
     req.on('close', () => {

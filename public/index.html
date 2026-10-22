@@ -29,6 +29,7 @@
   body[data-state="thinking"] { --accent: var(--amber); }
   body[data-state="speaking"] { --accent: var(--violet); }
   body[data-state="permission"] { --accent: var(--amber); }
+  body[data-state="offline"] { --accent: var(--muted); }
 
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -117,7 +118,7 @@
     color: var(--accent); text-shadow: 0 0 10px var(--accent); transition: color .4s; padding-left: .38em;
   }
   body[data-state="idle"] .state { color: var(--muted); text-shadow: none; }
-  body[data-state="permission"] .state { animation: blink 1s ease-in-out infinite; }
+  body[data-state="permission"] .state, body[data-state="offline"] .state { animation: blink 1s ease-in-out infinite; }
   .interim { font-style: italic; color: var(--teal); opacity: .85; min-height: 22px; text-align: center; padding: 0 12px; font-size: 14px; }
 
   /* Transcript panel */
@@ -174,6 +175,7 @@
   .perm.task pre { white-space: pre-wrap; font-family: inherit; font-size: 13.5px; color: var(--text); }
   .taskchip { margin-left: 8px; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--green, #5cffb0); border: 1px solid rgba(92,255,176,.45); border-radius: 999px; padding: 2px 8px; cursor: help; animation: blink 2s ease-in-out infinite; }
   .taskchip[hidden] { display: none; }
+  button.auto-on { border-color: var(--amber, #ffb547); color: var(--amber, #ffb547); background: rgba(255,181,71,.10); box-shadow: 0 0 14px rgba(255,181,71,.25); }
   .perm.done { opacity: .55; box-shadow: none; }
   .perm-result { margin-top: 6px; font-size: 13px; color: var(--muted); }
   .banner {
@@ -251,6 +253,7 @@
     <div class="controls">
       <button id="wakeBtn" title="Listen continuously for the wake word">Wake word</button>
       <button id="muteBtn" title="Turn spoken replies on/off">Voice on</button>
+      <button id="autoBtn" title="Auto mode: Eve acts without asking permission (risky actions like shutdown still ask)">Auto: off</button>
       <button id="stopBtn" title="Interrupt (Esc)">Stop</button>
       <button id="newBtn" title="Start a fresh conversation (memory is kept)">New chat</button>
     </div>
@@ -286,12 +289,37 @@ const fx = (() => {
     thinking:   [255, 181, 71, .30, 2.4],
     speaking:   [185, 140, 255, .60, .9],
     permission: [255, 170, 60, .40, .5],
+    offline:    [111, 142, 163, .03, .08],
   };
   const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const orb = document.getElementById('orb'), wave = document.getElementById('wave');
   const oc = orb.getContext('2d'), wc = wave.getContext('2d');
   const cur = [...palette.idle];
   let boost = 0, t = 0, last = performance.now();
+  // Live microphone level while actively listening (released as soon as listening stops).
+  let analyser = null, samples = null, micStream = null, micToken = 0, micWanted = false;
+  function listen(on) {
+    if (on === micWanted) return;
+    micWanted = on;
+    const token = ++micToken;
+    micStream?.getTracks().forEach((tr) => tr.stop());
+    micStream = analyser = null;
+    if (!on || !navigator.mediaDevices) return;
+    navigator.mediaDevices.getUserMedia({ audio: true }).then((s) => {
+      if (token !== micToken) return s.getTracks().forEach((tr) => tr.stop());
+      const ctx = audioCtx();
+      micStream = s; analyser = ctx.createAnalyser(); analyser.fftSize = 1024;
+      samples = new Float32Array(analyser.fftSize);
+      ctx.createMediaStreamSource(s).connect(analyser);
+    }).catch(() => {});
+  }
+  function micLevel() {
+    if (!analyser) return -1;
+    analyser.getFloatTimeDomainData(samples);
+    let sum = 0;
+    for (const v of samples) sum += v * v;
+    return Math.min(1, Math.sqrt(sum / samples.length) * 7);
+  }
   const sparks = Array.from({ length: 36 }, () => ({ a: Math.random() * 6.28, r: .55 + Math.random() * .4, s: .3 + Math.random() * .9, z: Math.random() }));
 
   function fit(c) {
@@ -363,7 +391,17 @@ const fx = (() => {
     const W = wave.width, H = wave.height, mid = H / 2, e = cur[3] + boost;
     wc.clearRect(0, 0, W, H);
     wc.globalCompositeOperation = 'lighter';
-    [[1, .9, 2], [.6, .45, 1.2], [.35, .25, 1]].forEach(([amp, alpha, lw], k) => {
+    if (analyser) { // real microphone signal (samples were just read by micLevel)
+      wc.beginPath();
+      for (let x = 0; x <= W; x += 2) {
+        const u = x / W, env = Math.sin(u * Math.PI) ** 2;
+        const y = mid + env * H * 1.6 * samples[Math.floor(u * (samples.length - 1))];
+        x ? wc.lineTo(x, y) : wc.moveTo(x, y);
+      }
+      wc.strokeStyle = rgba(.95); wc.lineWidth = 2 * Math.min(devicePixelRatio || 1, 2);
+      wc.shadowColor = rgba(1); wc.shadowBlur = 10; wc.stroke();
+    }
+    [[1, .9, 2], [.6, .45, 1.2], [.35, .25, 1]].slice(analyser ? 1 : 0).forEach(([amp, alpha, lw], k) => {
       wc.beginPath();
       for (let x = 0; x <= W; x += 3) {
         const u = x / W, env = Math.sin(u * Math.PI) ** 2; // fade out at both ends
@@ -381,15 +419,25 @@ const fx = (() => {
     const dt = Math.min(.05, (now - last) / 1000); last = now;
     const state = document.body.dataset.state || 'idle', target = palette[state] || palette.idle;
     for (let i = 0; i < 5; i++) cur[i] += (target[i] - cur[i]) * Math.min(1, dt * 4); // smooth colour/energy transitions
-    if (state === 'speaking' || state === 'listening') boost += (Math.random() - .5) * .04;
-    boost = Math.max(0, boost * Math.pow(.04, dt));
+    const level = micLevel();
+    if (level >= 0) boost += (level * .6 - boost) * Math.min(1, dt * 14); // orb pulses with your voice
+    else {
+      if (state === 'speaking' || state === 'listening') boost += (Math.random() - .5) * .04;
+      boost = Math.max(0, boost * Math.pow(.04, dt));
+    }
     t += dt * (reduced ? .25 : 1);
     drawOrb(state); drawWave(state);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-  return { kick: (amount = .3) => { boost = Math.min(.6, boost + amount); } };
+  return { kick: (amount = .3) => { boost = Math.min(.6, boost + amount); }, listen };
 })();
+// One shared AudioContext for chimes and the mic level meter.
+function audioCtx() {
+  const ctx = audioCtx.ctx ||= new AudioContext();
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  return ctx;
+}
 </script>
 
 <script>
@@ -399,13 +447,14 @@ const $ = (id) => document.getElementById(id);
 const log = $('log');
 
 // ---------- UI helpers ----------
-let busy = false, speaking = false, listening = false, reportedState = null;
+let busy = false, speaking = false, listening = false, offline = false, reportedState = null;
 const perms = new Map(); // pending permission id -> card element
 function render() {
   const base = speaking ? 'speaking' : listening ? 'listening' : busy ? 'thinking' : 'idle';
-  const state = perms.size ? 'permission' : base;
+  const state = offline ? 'offline' : perms.size ? 'permission' : base;
   document.body.dataset.state = state;
-  $('state').textContent = { idle: wakeMode ? `say "${CFG.wakeWord}"` : 'standby', listening: 'listening', thinking: 'processing', speaking: 'speaking', permission: 'awaiting your ok' }[state];
+  fx.listen(base === 'listening');
+  $('state').textContent = { idle: wakeMode ? `say "${CFG.wakeWord}"` : 'standby', listening: 'listening', thinking: 'processing', speaking: 'speaking', permission: 'awaiting your ok', offline: 'reconnecting' }[state];
   // Tell the server (and through it, the desktop overlay) what we're doing.
   if (base !== reportedState) { reportedState = base; postJson('/api/ui-state', { state: base }).catch(() => {}); }
 }
@@ -433,7 +482,7 @@ function renderReply(el, text) {
 }
 function chime(freq = 880) {
   try {
-    const ctx = chime.ctx ||= new AudioContext();
+    const ctx = audioCtx();
     const o = ctx.createOscillator(), g = ctx.createGain();
     o.frequency.value = freq; o.type = 'sine';
     g.gain.setValueAtTime(.0001, ctx.currentTime);
@@ -505,17 +554,23 @@ function onDone() {
 
 // ---------- Server connection ----------
 const events = new EventSource('/events');
+events.onopen = () => { offline = false; render(); };
+events.onerror = () => { offline = true; render(); }; // the browser retries by itself
 events.onmessage = (e) => {
   const ev = JSON.parse(e.data);
   switch (ev.type) {
     case 'hello':
-      busy = ev.busy; setModel(ev.model); setTask(ev.task);
+      busy = ev.busy; setModel(ev.model); setTask(ev.task); setAuto(ev.auto);
       if (ev.uiHash !== CFG.uiHash) $('banner').hidden = false;
       for (const id of [...perms.keys()]) if (!ev.pending.some((p) => p.id === id)) resolvePermission(id, 'cancelled');
       ev.pending.forEach(showPermission);
       render();
       break;
     case 'model': setModel(ev.model); break;
+    case 'auto':
+      if (ev.on !== autoOn) addMsg('system', ev.on ? '⚡ Auto mode on. Eve will act without asking (shutdowns, disk wipes and similar still ask).' : '🔐 Auto mode off. Eve will ask before acting again.');
+      setAuto(ev.on);
+      break;
     case 'task': setTask(ev.task); if (!ev.task && ev.reason === 'done') addMsg('system', '✓ Task finished. Normal permission prompts are back.'); break;
     case 'permission': showPermission(ev); break;
     case 'permission-resolved': resolvePermission(ev.id, ev.decision); break;
@@ -718,6 +773,15 @@ $('muteBtn').onclick = () => { voiceOn = !voiceOn; if (!voiceOn) shutUp(); updat
 $('stopBtn').onclick = stopAll;
 $('reloadBtn').onclick = () => location.reload();
 $('newBtn').onclick = () => { stopAll(); post('/api/reset'); };
+// Auto mode: one click by the user is the consent; the server remembers it across restarts.
+let autoOn = false;
+function setAuto(on) {
+  autoOn = !!on;
+  $('autoBtn').classList.toggle('on', autoOn);
+  $('autoBtn').classList.toggle('auto-on', autoOn);
+  $('autoBtn').textContent = autoOn ? '⚡ Auto: on' : 'Auto: off';
+}
+$('autoBtn').onclick = () => postJson('/api/auto', { on: !autoOn });
 $('micBtn').onclick = talk;
 $('reactor').onclick = talk;
 $('form').onsubmit = (e) => { e.preventDefault(); send($('input').value); $('input').value = ''; };
@@ -741,4 +805,10 @@ $('bootBtn').onclick = async () => {
 };
 if (!SR) $('bootNote').textContent = 'Voice input needs Edge or Chrome. Text chat works everywhere.';
 updateButtons();
+// In Eve's own app window (opened with autoplay allowed) skip the click once the mic is already allowed.
+if (new URLSearchParams(location.search).has('app') && navigator.permissions) {
+  navigator.permissions.query({ name: 'microphone' })
+    .then((p) => { if (p.state === 'granted' && $('boot')) $('bootBtn').click(); })
+    .catch(() => {});
+}
 </script>

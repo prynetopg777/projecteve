@@ -13,6 +13,7 @@ import { describe, grantKey, isAutoAllowed, isTaskDone } from './permissions.mjs
 
 const SESSION_FILE = path.join(DATA_DIR, 'session.json');
 const TASK_FILE = path.join(DATA_DIR, 'task.json'); // the plan the user approved; survives self-restarts
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json'); // { autoMode }
 const MODEL_FILE = path.join(DATA_DIR, 'model.json'); // written by tools/eve.mjs when Eve switches models
 export const MODELS = ['haiku', 'sonnet', 'opus'];
 const PERMISSION_TIMEOUT_MS = 3 * 60 * 1000;
@@ -31,6 +32,19 @@ export class Brain extends EventEmitter {
     this.notes = []; // system notes prepended to the next user message
     const task = readJson(TASK_FILE);
     this.task = task.until > Date.now() ? task : null; // { plan, until }
+    this.autoMode = !!readJson(SETTINGS_FILE).autoMode; // act without permission prompts (except the always-ask list)
+  }
+
+  setAutoMode(on) {
+    this.autoMode = !!on;
+    writeJson(SETTINGS_FILE, { ...readJson(SETTINGS_FILE), autoMode: this.autoMode });
+    this.emit('auto', this.autoMode);
+    // Switching on also approves whatever is waiting right now (unless it's on the always-ask list).
+    if (this.autoMode) {
+      for (const [id, p] of [...this.pending]) {
+        if (p.req.id && isAutoAllowed(p.req.tool, p.input, { taskActive: true })) this.respond(id, 'allow');
+      }
+    }
   }
 
   get busy() {
@@ -116,7 +130,7 @@ export class Brain extends EventEmitter {
         this.turn = { resolve, reject, text: '', messages: 0 };
         this.emit('busy', true);
         const notes = this.notes.splice(0).map((n) => `[System note: ${n}]\n`).join('');
-        const content = `[${timestamp()} · model: ${this.runningModel}]\n${notes}${text}`;
+        const content = `[${timestamp()} · model: ${this.runningModel} · auto mode: ${this.autoMode ? 'on' : 'off'}]\n${notes}${text}`;
         this.#send({ type: 'user', message: { role: 'user', content } });
       });
     const p = this.queue.then(run, run);
@@ -240,7 +254,7 @@ export class Brain extends EventEmitter {
     }
     const { tool_name: tool, input, description } = request;
     if (isTaskDone(tool, input)) this.endTask('done');
-    if (isAutoAllowed(tool, input, { grants: this.grants, taskActive: this.taskActive })) {
+    if (isAutoAllowed(tool, input, { grants: this.grants, taskActive: this.autoMode || this.taskActive })) {
       this.pending.set(id, { req: {}, input });
       return this.respond(id, 'allow');
     }
