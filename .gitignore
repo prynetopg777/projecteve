@@ -1,3 +1,4 @@
 data/
 workspace/memory/
 node_modules/
+.playwright-mcp/

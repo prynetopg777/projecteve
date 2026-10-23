@@ -1,6 +1,34 @@
-# E.V.E.
+# E.V.E. — Evolving Virtual Entity
 
-A personal voice assistant that uses your **Claude Code CLI** as her brain. She runs on your Claude subscription, so you don't need an API key, and she has no npm dependencies.
+**A voice assistant that lives on your Windows PC, runs on your Claude subscription, and can safely improve her own code.**
+
+Say *"Hey Eve, open Spotify and remind me to stretch in 20 minutes"* and she does it. Talk in English, Filipino or Taglish, interrupt her mid-sentence, and she answers in a natural voice.
+
+## Why you'll like her
+
+- **She actually controls your PC.** Opens apps and sites, manages files, sets reminders, searches the web, drives a browser with Playwright.
+- **Safe by design.** Permissions are enforced in code (`src/permissions.mjs`), not just promised in a prompt. She asks once per task, shows exactly what will run, and risky actions (shutdown, disk wiping, uninstalling) always ask, even in auto mode.
+- **Self-improving, with a safety net.** She edits her own code only with your approval, syntax-checks it, and rolls back automatically if it crashes. Undo any update with one command.
+- **She remembers.** Searchable long-term memory (SQLite full-text search) plus a small knowledge graph of people and things you tell her about.
+- **Skills.** Drop a `.md` recipe in `workspace/skills/` and she follows it.
+- **Transparent and cheap.** No API key, no npm dependencies. A usage log and a report page (`node tools/report.mjs`) show exactly what each conversation costs. Chat uses haiku, everyday work sonnet, opus only for heavy jobs.
+
+## Try her in 2 minutes
+
+You need Windows 10/11, Node 22+, Microsoft Edge, and the [Claude Code CLI](https://claude.com/claude-code) signed in to your account.
+
+```
+git clone <this repo>
+cd <folder>
+powershell -File setup.ps1     # checks requirements, runs tests, creates a desktop shortcut
+npm start
+```
+
+Click **Initialize**, allow the microphone, and say **"Eve, what's the weather in Singapore?"**
+
+**Early-stage software:** Eve is a personal project being tested by friends. Connectors (Gmail, Calendar, GitHub) are experimental, and speech recognition defaults to Filipino/Taglish, so English words are occasionally misspelled (set `"speechLang": "en-US"` for English only). Bug reports and feedback are very welcome.
+
+---
 
 ## Run her
 
@@ -124,17 +152,9 @@ npm test
 
 Covers the permission rules and reminder parsing. Run it after any change to `src/permissions.mjs`.
 
-## What makes Eve different
-
-Most voice assistants either run in the cloud with no control over your PC, or run local commands with no guardrails. Eve is:
-
-- **Self-improving, safely:** she edits her own code only with your approval, syntax-checks it, and rolls back automatically if it crashes.
-- **Permission-aware in software:** rules are enforced in code, not just in a prompt, and she asks once per task instead of once per step.
-- **Transparent:** a usage log shows exactly what each conversation costs.
-
 ## Memory, skills and browsing
 
-- **Searchable memory:** `tools/memory.mjs` stores events and details in a local SQLite database (`data/memory.db`, full-text search). Eve searches it before answering questions about your past or plans. Needs Node 22+.
+- **Searchable memory:** `tools/memory.mjs` stores events and details in a local SQLite database (`data/memory.db`, full-text search). Eve searches it before answering questions about your past or plans. `link` and `graph` add a small knowledge graph (`link "Mom" "sister of" "Aunt Ana"`, then `graph "Mom"`). Needs Node 22+.
 - **Skills:** drop a `.md` recipe into `workspace/skills/` and Eve follows it when a request matches.
 - **Browser automation:** the `browser` connector runs Playwright MCP so Eve can open and operate web pages. Every connector tool asks permission on first use.
 - **Setup:** run `powershell -File setup.ps1` to check requirements, run tests and create the shortcut.
