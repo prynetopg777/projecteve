@@ -175,6 +175,10 @@ const routes = {
     brain.setAutoMode(on);
     json(res, 200, { ok: true, auto: brain.autoMode });
   },
+  'POST /api/model': async (req, res) => {
+    const { model } = await readJson(req);
+    try { brain.setModel(model); json(res, 200, { ok: true, model }); } catch (e) { json(res, 400, { error: e.message }); }
+  },
   'POST /api/stop': (req, res) => {
     brain.interrupt(); // instant; keeps Claude warm (falls back to a hard stop)
     json(res, 200, { ok: true });

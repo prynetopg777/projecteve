@@ -39,7 +39,7 @@
       radial-gradient(ellipse 60% 40% at 50% 110%, #062033 0%, transparent 70%),
       linear-gradient(180deg, var(--bg2), var(--bg)) fixed;
     color: var(--text);
-    font: 14.5px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    font: clamp(13.5px, 0.55vw + 9.5px, 19px)/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
     display: grid;
     grid-template-rows: auto 1fr auto;
     max-width: 960px;
@@ -80,7 +80,10 @@
   @keyframes blink { 50% { opacity: .35; } }
   .model { margin-left: 4px; font-size: 9.5px; letter-spacing: .18em; color: var(--muted); text-shadow: none; border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; text-transform: uppercase; font-weight: 500; }
   .model:empty { display: none; }
-  .controls { display: flex; gap: 6px; flex-wrap: wrap; }
+  select { font: inherit; font-size: 12.5px; color: var(--text); background: rgba(10, 26, 44, .8); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; max-width: 150px; cursor: pointer; }
+  select:hover, select:focus-visible { border-color: var(--line-hi); outline: none; }
+  select option { background: #061224; }
+  .controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
   button {
     font: inherit; font-size: 12.5px; color: var(--text); cursor: pointer;
@@ -234,6 +237,32 @@
     .panel { grid-column: 2; grid-row: 2; }
     form { max-width: none; }
   }
+  /* Scale with resolution: larger screens get a wider layout and bigger type */
+  @media (min-width: 1500px) and (min-height: 760px) {
+    body { max-width: min(1500px, 92vw); }
+    main { grid-template-columns: minmax(380px, 1fr) 1.3fr; }
+    .reactor { width: clamp(260px, 44vh, 460px); }
+    .msg { max-width: 80%; }
+  }
+  @media (min-width: 2200px) and (min-height: 1100px) {
+    body { max-width: min(2000px, 90vw); }
+    .reactor { width: clamp(340px, 46vh, 640px); }
+    .wave { width: min(560px, 92%); height: 52px; }
+  }
+  /* Short or narrow windows: tighten spacing so nothing gets cut off */
+  @media (max-height: 640px) {
+    header { margin-top: 6px; padding: 5px 10px 5px 14px; }
+    .reactor { width: clamp(110px, 24vh, 200px); }
+    .wave { height: 28px; }
+    .interim { min-height: 16px; font-size: 13px; }
+    form { padding-top: 6px; padding-bottom: 8px; }
+  }
+  @media (max-width: 520px) {
+    body { padding: 0 8px; }
+    .brand { letter-spacing: .28em; }
+    .msg { max-width: 94%; }
+    button { padding: 5px 10px; }
+  }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; }
   }
@@ -251,6 +280,8 @@
   <header>
     <div class="brand">E.V.E.<span class="model" id="model" title="Claude model Eve is currently using"></span><span class="taskchip" id="taskChip" hidden>● Working on approved plan</span></div>
     <div class="controls">
+      <select id="modelSel" title="Switch Eve's model (applies from her next reply)"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option></select>
+      <select id="voiceSel" title="Choose Eve's voice"></select>
       <button id="wakeBtn" title="Listen continuously for the wake word">Wake word</button>
       <button id="muteBtn" title="Turn spoken replies on/off">Voice on</button>
       <button id="autoBtn" title="Auto mode: Eve acts without asking permission (risky actions like shutdown still ask)">Auto: off</button>
@@ -701,7 +732,24 @@ events.onmessage = (e) => {
   }
 };
 
-function setModel(m) { $('model').textContent = m || ''; }
+function setModel(m) { $('model').textContent = m || ''; if (m) $('modelSel').value = m; }
+$('modelSel').onchange = (e) => postJson('/api/model', { model: e.target.value }).catch(() => {});
+
+function fillVoiceSel() {
+  const sel = $('voiceSel');
+  sel.replaceChildren(...englishVoices().map((v) => {
+    const o = document.createElement('option');
+    o.value = v.name; o.textContent = shortVoiceName(v); o.selected = v === voice;
+    return o;
+  }));
+}
+$('voiceSel').onfocus = fillVoiceSel;
+$('voiceSel').onchange = (e) => {
+  localStorage.setItem('eveVoice', e.target.value); pickVoice();
+  const t = `How's this, ${CFG.honorific}? This is ${shortVoiceName(voice)}.`;
+  addMsg('eve', t); say(t);
+};
+speechSynthesis.addEventListener('voiceschanged', fillVoiceSel); fillVoiceSel();
 // While an approved plan is running, show it in the header (hover for the full plan).
 function setTask(task) {
   const chip = $('taskChip');

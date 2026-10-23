@@ -103,6 +103,13 @@ export class Brain extends EventEmitter {
     return MODELS.includes(m) ? m : this.cfg.model;
   }
 
+  /** Switch the conversation model; the process restarts on it at the next reply. */
+  setModel(m) {
+    if (!MODELS.includes(m)) throw new Error(`Unknown model "${m}"`);
+    writeJson(MODEL_FILE, { model: m });
+    this.emit('model', m);
+  }
+
   start() {
     const persona = fs
       .readFileSync(path.join(ROOT, 'prompts/persona.md'), 'utf8')
