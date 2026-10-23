@@ -30,7 +30,7 @@ brain.on('delta', (text) => broadcast({ type: 'delta', text }));
 brain.on('tool', ({ name, input, sub }) => broadcast({ type: 'tool', name, sub, detail: describeTool(input) }));
 brain.on('done', (text) => broadcast({ type: 'done', text }));
 brain.on('error', (err) => broadcast({ type: 'error', message: err.message }));
-brain.on('model', (model) => broadcast({ type: 'model', model }));
+brain.on('model', (model) => broadcast({ type: 'model', model, pref: brain.modelPref }));
 brain.on('task', (task, reason) => broadcast({ type: 'task', task, reason }));
 brain.on('auto', (on) => { console.log(on ? '⚡ Auto mode ON: Eve acts without asking' : '🔐 Auto mode off'); broadcast({ type: 'auto', on }); });
 brain.on('refreshed', () => { console.log('🧹 Context refreshed: fresh session (memory kept)'); broadcast({ type: 'refreshed' }); });
@@ -133,7 +133,7 @@ function status() {
   const state = pending ? 'permission' : ui === 'speaking' || ui === 'listening' ? ui : brain.busy ? 'thinking' : 'idle';
   const reminder = reminderFlash && reminderFlash.until > Date.now() ? reminderFlash.text : null;
   const task = brain.taskActive ? brain.task : null;
-  return { state, busy: brain.busy, model: brain.runningModel || brain.model, clients: clients.size, pending, reminder, task, auto: brain.autoMode };
+  return { state, busy: brain.busy, model: brain.runningModel || brain.model, pref: brain.modelPref, clients: clients.size, pending, reminder, task, auto: brain.autoMode };
 }
 
 const routes = {
@@ -224,7 +224,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && url.pathname === '/events') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    const hello = { type: 'hello', uiHash: pageHash(), model: brain.runningModel || brain.model, busy: brain.busy, pending: brain.pendingPermissions, task: brain.taskActive ? brain.task : null, auto: brain.autoMode };
+    const hello = { type: 'hello', uiHash: pageHash(), model: brain.runningModel || brain.model, pref: brain.modelPref, busy: brain.busy, pending: brain.pendingPermissions, task: brain.taskActive ? brain.task : null, auto: brain.autoMode };
     // retry: reconnect quickly after a restart, well inside the "is a window already open?" wait below.
     res.write(`retry: 1000\ndata: ${JSON.stringify(hello)}\n\n`);
     clients.add(res);

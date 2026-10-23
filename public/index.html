@@ -280,7 +280,7 @@
   <header>
     <div class="brand">E.V.E.<span class="model" id="model" title="Claude model Eve is currently using"></span><span class="taskchip" id="taskChip" hidden>● Working on approved plan</span></div>
     <div class="controls">
-      <select id="modelSel" title="Switch Eve's model (applies from her next reply)"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option></select>
+      <select id="modelSel" title="Switch Eve's model (applies from her next reply)"><option value="auto">Auto</option><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option></select>
       <select id="voiceSel" title="Choose Eve's voice"></select>
       <button id="wakeBtn" title="Listen continuously for the wake word">Wake word</button>
       <button id="muteBtn" title="Turn spoken replies on/off">Voice on</button>
@@ -701,13 +701,13 @@ events.onmessage = (e) => {
   const ev = JSON.parse(e.data);
   switch (ev.type) {
     case 'hello':
-      busy = ev.busy; setModel(ev.model); setTask(ev.task); setAuto(ev.auto);
+      busy = ev.busy; setModel(ev.model, ev.pref); setTask(ev.task); setAuto(ev.auto);
       if (ev.uiHash !== CFG.uiHash) $('banner').hidden = false;
       for (const id of [...perms.keys()]) if (!ev.pending.some((p) => p.id === id)) resolvePermission(id, 'cancelled');
       ev.pending.forEach(showPermission);
       render();
       break;
-    case 'model': setModel(ev.model); break;
+    case 'model': setModel(ev.model, ev.pref); break;
     case 'auto':
       if (ev.on !== autoOn) addMsg('system', ev.on ? '⚡ Auto mode on. Eve will act without asking (shutdowns, disk wipes and similar still ask).' : '🔐 Auto mode off. Eve will ask before acting again.');
       setAuto(ev.on);
@@ -732,7 +732,7 @@ events.onmessage = (e) => {
   }
 };
 
-function setModel(m) { $('model').textContent = m || ''; if (m) $('modelSel').value = m; }
+function setModel(m, pref) { $('model').textContent = m ? (pref === 'auto' ? m + ' (auto)' : m) : ''; if (pref || m) $('modelSel').value = pref || m; }
 $('modelSel').onchange = (e) => postJson('/api/model', { model: e.target.value }).catch(() => {});
 
 function fillVoiceSel() {

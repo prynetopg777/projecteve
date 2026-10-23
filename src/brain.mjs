@@ -100,14 +100,31 @@ export class Brain extends EventEmitter {
   /** The model Eve has chosen (falls back to config.model). */
   get model() {
     const m = readJson(MODEL_FILE).model;
+    if (m === 'auto') return this.autoPick || 'sonnet';
     return MODELS.includes(m) ? m : this.cfg.model;
   }
 
-  /** Switch the conversation model; the process restarts on it at the next reply. */
+  /** What the user selected: 'auto' or a fixed model. */
+  get modelPref() {
+    const m = readJson(MODEL_FILE).model;
+    return m === 'auto' || MODELS.includes(m) ? m : this.cfg.model;
+  }
+
+  /** Switch the conversation model (or 'auto'); the process restarts on it at the next reply. */
   setModel(m) {
-    if (!MODELS.includes(m)) throw new Error(`Unknown model "${m}"`);
+    if (m !== 'auto' && !MODELS.includes(m)) throw new Error(`Unknown model "${m}"`);
     writeJson(MODEL_FILE, { model: m });
-    this.emit('model', m);
+    this.emit('model', this.runningModel || this.model);
+  }
+
+  /** Auto mode: choose the lightest model that suits this message. */
+  #pickModel(text) {
+    const t = text.toLowerCase();
+    const heavy = /\b(code|script|program|build|implement|refactor|debug|fix|bug|improve yourself|upgrade yourself|edit|rewrite|write (a|an|me)|plan|research|analy[sz]e|compare|explain why|essay|architecture|optimi[sz]e|install|deep|detailed|step by step)\b/;
+    const simple = /\b(hi|hello|hey|thanks|thank you|okay|ok|yes|no|open|play|pause|volume|mute|time|date|weather|remind|timer|alarm|joke|how are you|what'?s up|good (morning|night))\b/;
+    if (this.taskActive || text.length > 350 || heavy.test(t)) return 'opus';
+    if (text.length <= 90 && simple.test(t)) return 'haiku';
+    return 'sonnet';
   }
 
   start() {
@@ -168,6 +185,7 @@ export class Brain extends EventEmitter {
       new Promise((resolve, reject) => {
         // Eve switched models during the last turn: restart the process on the new model, same conversation.
         this.#maybeRefresh();
+        if (readJson(MODEL_FILE).model === 'auto') this.autoPick = this.#pickModel(text);
         if (this.proc && this.runningModel !== this.model) this.#kill();
         if (!this.proc) this.start();
         this.turn = { resolve, reject, text: '', messages: 0, userText: text };
