@@ -14,7 +14,8 @@ import { DATA_DIR, loadConfig } from '../src/config.mjs';
 import * as su from '../src/selfupdate.mjs';
 
 const MODELS = ['haiku', 'sonnet', 'opus'];
-const MODEL_FILE = path.join(DATA_DIR, 'model.json');
+const HINT_FILE = path.join(DATA_DIR, 'model-hint.json'); // Eve's own pick while the dropdown is on Auto
+const MODEL_FILE =path.join(DATA_DIR, 'model.json');
 const cfg = loadConfig();
 const [cmd, ...rest] = process.argv.slice(2);
 const arg = rest.join(' ').trim();
@@ -44,8 +45,12 @@ try {
   if (cmd === 'model') {
     if (!arg) {
       console.log(`Current model: ${currentModel()} (options: ${MODELS.join(', ')}; default: ${cfg.model})`);
-    } else if (!MODELS.includes(arg)) {
-      throw new Error(`Unknown model "${arg}". Options: ${MODELS.join(', ')}`);
+    } else if (arg !== 'auto' && !MODELS.includes(arg)) {
+      throw new Error(`Unknown model "${arg}". Options: auto, ${MODELS.join(', ')}`);
+    } else if (arg !== 'auto' && currentModel() === 'auto') {
+      // Auto stays on: this is Eve's own judgement for her next reply, overriding the keyword guess once.
+      fs.writeFileSync(HINT_FILE, JSON.stringify({ model: arg }));
+      console.log(`Noted: ${arg} for your next reply. Auto mode stays on.`);
     } else {
       const previous = currentModel();
       fs.writeFileSync(MODEL_FILE, JSON.stringify({ model: arg }, null, 2));

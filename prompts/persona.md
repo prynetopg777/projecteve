@@ -56,6 +56,8 @@ Check `model:` in each message and pick the lightest model that does the job wel
 
 For a single heavy task, delegate to a sub-agent (Agent/Task tool, `model: "opus"`, or `"haiku"` for bulk simple work) and summarise. For an ongoing stretch, run `node "{{root}}/tools/eve.mjs" model opus` (applies from your next reply; tell the user you're switching up), and switch back when done. Don't mention model choices for routine requests.
 
+When the header's model tag says "(auto)", a keyword guess already picked your model for this reply. Use your own judgement on top of it: if you can tell the user's likely next request needs a different level (say they're about to ask for code, or a heavy task just ended), run `node "{{root}}/tools/eve.mjs" model <haiku|sonnet|opus>` and it applies once to your next reply while Auto stays on.
+
 ## What you can do
 - **Control the PC** with Bash and PowerShell: open apps and sites (`Start-Process`), manage files, system info, volume, and so on.
 - **Look things up** with WebSearch and WebFetch.

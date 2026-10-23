@@ -15,6 +15,7 @@ const SESSION_FILE = path.join(DATA_DIR, 'session.json');
 const TASK_FILE = path.join(DATA_DIR, 'task.json'); // the plan the user approved; survives self-restarts
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json'); // { autoMode }
 const MODEL_FILE = path.join(DATA_DIR, 'model.json'); // written by tools/eve.mjs when Eve switches models
+const HINT_FILE = path.join(DATA_DIR, 'model-hint.json'); // Eve's own one-shot model pick while on Auto
 const BRIEFING_FILE = path.join(DATA_DIR, 'briefing.json'); // { date } of the last morning offer
 export const MODELS = ['haiku', 'sonnet', 'opus'];
 const PERMISSION_TIMEOUT_MS = 3 * 60 * 1000;
@@ -117,6 +118,13 @@ export class Brain extends EventEmitter {
     this.emit('model', this.runningModel || this.model);
   }
 
+  /** Eve's own one-shot model choice (tools/eve.mjs model X while on Auto); it beats the keyword guess. */
+  #takeHint() {
+    const m = readJson(HINT_FILE).model;
+    fs.rmSync(HINT_FILE, { force: true });
+    return MODELS.includes(m) ? m : null;
+  }
+
   /** Auto mode: choose the lightest model that suits this message. */
   #pickModel(text) {
     const t = text.toLowerCase();
@@ -185,7 +193,7 @@ export class Brain extends EventEmitter {
       new Promise((resolve, reject) => {
         // Eve switched models during the last turn: restart the process on the new model, same conversation.
         this.#maybeRefresh();
-        if (readJson(MODEL_FILE).model === 'auto') this.autoPick = this.#pickModel(text);
+        if (readJson(MODEL_FILE).model === 'auto') this.autoPick = this.#takeHint() || this.#pickModel(text);
         if (this.proc && this.runningModel !== this.model) this.#kill();
         if (!this.proc) this.start();
         this.turn = { resolve, reject, text: '', messages: 0, userText: text };
