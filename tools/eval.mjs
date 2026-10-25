@@ -68,6 +68,8 @@ if (cmd === 'compare' && point) {
     ['volume up', 'volume'], ['Eve, turn the volume down a little', 'volume'], ['mute', 'volume'], ['set the volume to 40', 'volume-set'],
     ['pause', 'media'], ['next song', 'media'], ['set a timer for 10 minutes', 'timer'], ['start a 5 minute timer', 'timer'],
     ['play despacito on spotify', null], ['set the volume to 400', null], ['start 5 minutes', null], ['why is my volume so low', null],
+    ['take a screenshot', 'screen'], ["Eve, what's on my screen?", 'screen'], ['look at my screen', 'screen'],
+    ['take a screenshot of chrome and save it to my desktop', null], ['why is my screen so dim', null],
   ];
   let pass = 0;
   for (const [text, want] of cases) {

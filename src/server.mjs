@@ -1,5 +1,6 @@
 // Local web server: serves the voice UI, relays brain events over SSE, fires reminders,
 // brokers permission requests, and reports status to the desktop overlay.
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -28,7 +29,7 @@ const broadcast = (event) => {
 };
 
 brain.on('delta', (text) => broadcast({ type: 'delta', text }));
-brain.on('tool', ({ name, input, sub }) => broadcast({ type: 'tool', name, sub, detail: describeTool(input) }));
+brain.on('tool', ({ name, input, sub }) => broadcast({ type: 'tool', name, sub, label: toolLabel(name, input) }));
 brain.on('done', (text) => broadcast({ type: 'done', text }));
 let lastError = null; // shown on the health page until the next good reply
 brain.on('error', (err) => { lastError = err.message.slice(0, 200); broadcast({ type: 'error', message: err.message }); });
@@ -68,22 +69,40 @@ startWatcherLoop((w) => {
 if (fs.existsSync(su.FAILED_FILE)) {
   try {
     const f = JSON.parse(fs.readFileSync(su.FAILED_FILE, 'utf8'));
-    brain.note(`Your last self-update ("${f.reason}") crashed on startup and was rolled back (git stash "${f.stash}"). Error output:\n${f.error}\nTell the user briefly and apologise.`);
+    brain.note(`Your last self-update ("${f.reason}") failed (crashed on startup or failed the visual self-check) and was rolled back (git stash "${f.stash}"). Error output:\n${f.error}\nTell the user briefly and apologise.`);
   } catch {
     // corrupt file: just drop it
   }
   fs.rmSync(su.FAILED_FILE, { force: true });
 }
 if (fs.existsSync(su.PENDING_FILE)) {
-  // Survived long enough: keep the update.
-  setTimeout(() => {
-    try {
-      let reason = 'self-update';
+  let reason = 'self-update';
+  try {
+    ({ reason } = JSON.parse(fs.readFileSync(su.PENDING_FILE, 'utf8')));
+  } catch {
+    // corrupt marker: generic reason
+  }
+  // Visual self-check once the server is up (page loads, no JS errors or stray text). Failing it rolls the update back.
+  const checked = new Promise((resolve) => setTimeout(() => {
+    execFile(process.execPath, [path.join(ROOT, 'tools/selfcheck.mjs')], { timeout: 90000, windowsHide: true }, (err, stdout) => {
+      if (!err) { console.log('🔎 Self-check passed.'); return resolve(true); }
+      const stash = `eve: failed self-check ${new Date().toISOString()}`;
+      console.error(`\n⏪ Self-update "${reason}" failed the self-check. Rolling back (git stash: "${stash}").\n${stdout}`);
       try {
-        ({ reason } = JSON.parse(fs.readFileSync(su.PENDING_FILE, 'utf8')));
-      } catch {
-        // corrupt marker: commit with a generic message
+        su.stash(stash);
+        fs.writeFileSync(su.FAILED_FILE, JSON.stringify({ reason, stash, error: `Self-check failed (tools/selfcheck.mjs):\n${String(stdout).slice(-1500)}` }, null, 2));
+      } catch (e) {
+        console.error(`Rollback failed: ${e.message}`);
       }
+      fs.rmSync(su.PENDING_FILE, { force: true });
+      resolve(false);
+      if (supervised) restart(); // the launcher brings the previous code back up
+    });
+  }, 3000));
+  // Survived long enough and passed the self-check: keep the update.
+  setTimeout(async () => {
+    if (!(await checked) || !fs.existsSync(su.PENDING_FILE)) return; // rolled back
+    try {
       const hash = su.commit(`eve: self-update - ${reason}`);
       fs.rmSync(su.PENDING_FILE, { force: true });
       console.log(`✅ Self-update committed${hash ? ` (${hash})` : ''}`);
@@ -265,7 +284,31 @@ server.listen(cfg.port, '127.0.0.1', () => {
   }
 });
 
-function describeTool(input = {}) {
-  const s = input.command || input.query || input.url || input.file_path || input.pattern || input.description || '';
-  return String(s).slice(0, 160);
+// A plain phrase for the chat ("Reading my notes…"); raw commands and paths are never sent to the UI.
+const BASH_LABELS = [
+  [/memory.mjss+(add|update|remove|link|forget)/, 'Updating my notes…'], [/memory.mjs|memory[\/]/, 'Reading my notes…'],
+  [/screenshot.mjs/, 'Looking at your screen…'], [/remind.mjs/, 'Checking reminders…'], [/watch.mjs/, 'Setting up a watcher…'],
+  [/desktop.mjs/, 'Working with your desktop…'], [/eve.mjss+restart/, 'Restarting myself…'], [/eve.mjss+(task|checkpoint)/, 'Getting ready…'],
+  [/eve.mjs/, 'Adjusting my settings…'], [/usage.mjs/, 'Checking usage…'], [/local.mjs/, 'Thinking locally…'], [/cache.mjs/, 'Checking my cache…'],
+  [/eval.mjs|selfcheck.mjs/, 'Running checks…'], [/connector.mjs/, 'Managing connectors…'], [/git/, 'Checking my history…'],
+  [/(start|Start-Process|explorer)/, 'Opening that…'], [/(curl|Invoke-WebRequest)/, 'Fetching from the web…'],
+];
+function toolLabel(name = '', input = {}) {
+  const file = String(input.file_path || input.path || '');
+  const mine = /memory[\/]|profile.md|session-state|recent.md|todo.md/i.test(file);
+  switch (name) {
+    case 'Bash': case 'PowerShell': {
+      const cmd = String(input.command || '');
+      return BASH_LABELS.find(([re]) => re.test(cmd))?.[1] || 'Working on it…';
+    }
+    case 'Read': return mine ? 'Reading my notes…' : /.(png|jpe?g|gif|webp)$/i.test(file) ? 'Looking at the image…' : 'Reading a file…';
+    case 'Write': case 'Edit': case 'MultiEdit': return mine ? 'Updating my notes…' : 'Editing a file…';
+    case 'Grep': case 'Glob': return mine ? 'Searching my notes…' : 'Searching files…';
+    case 'Screenshot': return 'Looking at your screen…';
+    case 'WebSearch': return 'Searching the web…';
+    case 'WebFetch': return 'Reading a web page…';
+    case 'Task': case 'Agent': return 'Asking a helper…';
+    case 'TodoWrite': return 'Planning…';
+    default: return name.startsWith('mcp__') ? `Using ${name.split('__')[1] || 'a connector'}…` : 'Working on it…';
+  }
 }

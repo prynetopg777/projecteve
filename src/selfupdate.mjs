@@ -55,6 +55,19 @@ export const log = (n = 8) => {
 export const lastCommitMessage = () => git('log', '-1', '--format=%s');
 export const revertHead = () => git('revert', '--no-edit', 'HEAD');
 
+/** Structural checks on the page: balanced <script> tags and nothing but closing tags after the last </script>. */
+export function pageStructure(html) {
+  const errors = [];
+  const opens = (html.match(/<script\b[^>]*>/gi) || []).length, closes = (html.match(/<\/script\s*>/gi) || []).length;
+  if (opens !== closes) errors.push(`public/index.html: ${opens} <script> tag(s) but ${closes} </script>; the page would break`);
+  const last = html.search(/<\/script\s*>(?![\s\S]*<\/script\s*>)/i);
+  if (last >= 0) {
+    const tail = html.slice(last).replace(/^<\/script\s*>/i, '');
+    if (!/^\s*(<\/body>\s*)?(<\/html>\s*)?$/i.test(tail)) errors.push(`public/index.html: content after the final </script> (it would show as text on the page): "${tail.trim().slice(0, 80)}"`);
+  }
+  return errors;
+}
+
 /** Syntax-check all of Eve's JavaScript, including the page's inline script. Returns a list of errors. */
 export function syntaxCheck() {
   const errors = [];
@@ -69,6 +82,7 @@ export function syntaxCheck() {
     for (const f of fs.readdirSync(path.join(ROOT, dir))) if (f.endsWith('.mjs')) check(path.join(ROOT, dir, f));
   }
   const html = fs.readFileSync(path.join(ROOT, 'public/index.html'), 'utf8');
+  errors.push(...pageStructure(html));
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   if (!scripts.length) errors.push('public/index.html: no <script> block found');
   scripts.forEach((script, i) => {

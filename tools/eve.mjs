@@ -84,7 +84,7 @@ try {
     if (errors.length) throw new Error(`Not restarting: syntax errors found. Fix them first.\n\n${errors.join('\n\n')}`);
     if (su.isDirty()) fs.writeFileSync(su.PENDING_FILE, JSON.stringify({ reason: arg || 'self-update', at: new Date().toISOString() }));
     await post('/api/restart', { reason: arg });
-    console.log('Syntax check passed. Restart scheduled: it happens right after this reply. If the new code crashes on startup it is rolled back automatically.');
+    console.log('Syntax and page-structure checks passed. Restart scheduled: it happens right after this reply. After startup tools/selfcheck.mjs loads the page (JS errors, stray text, screenshot in data/selfcheck.png); if the new code crashes or fails that check it is rolled back automatically.');
   } else if (cmd === 'undo') {
     if (su.stash(`eve: undone changes ${new Date().toISOString()}`)) {
       console.log('Uncommitted changes were stashed (recover with `git stash pop`). Run restart to load the previous code.');

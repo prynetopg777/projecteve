@@ -242,7 +242,8 @@ export class Brain extends EventEmitter {
       new Promise(async (resolve, reject) => {
         // Eve switched models during the last turn: restart the process on the new model, same conversation.
         const fast = fastPath(text, this.cfg);
-        if (fast) return this.#fastReply(text, fast, resolve);
+        if (fast?.reply) return this.#fastReply(text, fast, resolve);
+        const image = fast?.image ? fs.readFileSync(fast.image).toString('base64') : null; // screenshot fast path: one model step
         this.#maybeRefresh();
         const capped = !!this.budget.dailyHardUsd && spentToday() >= this.budget.dailyHardUsd;
         if (capped && !this.capped) this.note(`Hard spending cap: today passed $${this.budget.dailyHardUsd}, so you're on haiku until midnight. Tell the user once, briefly; they can raise budget.dailyHardUsd in config.json.`);
@@ -268,7 +269,12 @@ export class Brain extends EventEmitter {
           this.#briefingNote();
           const notes = this.notes.splice(0).map((n) => `[System note: ${n}]\n`).join('');
           const content = `[${timestamp()} · model: ${this.runningModel} · auto mode: ${this.autoMode ? 'on' : 'off'}]\n${notes}${text}`;
-          this.#send({ type: 'user', message: { role: 'user', content } });
+          const body = image
+            ? [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: image } }, { type: 'text', text: `${content}
+[System note: fast path "${fast.name}": ${fast.ask}]` }]
+            : content;
+          if (image) this.emit('tool', { name: 'Screenshot', input: {}, sub: false });
+          this.#send({ type: 'user', message: { role: 'user', content: body } });
         } catch (err) {
           reject(err);
         }

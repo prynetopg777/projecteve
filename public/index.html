@@ -84,6 +84,11 @@
   select:hover, select:focus-visible { border-color: var(--line-hi); outline: none; }
   select option { background: #061224; }
   .controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .controls { position: relative; }
+  header { position: relative; z-index: 30; }
+  .settings { position: absolute; top: calc(100% + 8px); right: 0; z-index: 20; display: flex; flex-direction: column; gap: 8px; min-width: 230px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: rgba(6, 18, 32, .96); box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
+  .settings[hidden] { display: none; }
+  .settings label { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); }
 
   button {
     font: inherit; font-size: 12.5px; color: var(--text); cursor: pointer;
@@ -289,14 +294,17 @@
   <header>
     <div class="brand">E.V.E.<span class="model" id="model" title="Claude model Eve is currently using"></span><span class="taskchip" id="taskChip" hidden>● Working on approved plan</span></div>
     <div class="controls">
-      <select id="modelSel" title="Switch Eve's model (applies from her next reply)"><option value="auto">Auto</option><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option></select>
-      <select id="voiceSel" title="Choose Eve's voice"></select>
-      <select id="langSel" title="Language Eve listens for"><option value="fil-PH">Filipino / Taglish</option><option value="en-PH">English (PH)</option><option value="en-US">English (US)</option></select>
-      <button id="wakeBtn" title="Listen continuously for the wake word">Wake word</button>
       <button id="muteBtn" title="Turn spoken replies on/off">Voice on</button>
       <button id="autoBtn" title="Auto mode: Eve acts without asking permission (risky actions like shutdown still ask)">Auto: off</button>
       <button id="stopBtn" title="Interrupt (Esc)">Stop</button>
-      <button id="newBtn" title="Start a fresh conversation (memory is kept)">New chat</button>
+      <button id="settingsBtn" title="Settings: model, voice, language, wake word, new chat" aria-expanded="false" aria-controls="settingsPanel">&#9881; Settings</button>
+      <div class="settings" id="settingsPanel" hidden>
+        <label>Model <select id="modelSel" title="Switch Eve's model (applies from her next reply)"><option value="auto">Auto</option><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option></select></label>
+        <label>Voice <select id="voiceSel" title="Choose Eve's voice"></select></label>
+        <label>Listening <select id="langSel" title="Language Eve listens for"><option value="fil-PH">Filipino / Taglish</option><option value="en-PH">English (PH)</option><option value="en-US">English (US)</option></select></label>
+        <button id="wakeBtn" title="Listen continuously for the wake word">Wake word</button>
+        <button id="newBtn" title="Start a fresh conversation (memory is kept)">New chat</button>
+      </div>
     </div>
   </header>
 
@@ -863,7 +871,7 @@ events.onmessage = (e) => {
     }
     case 'user': if (ev.text !== lastSent) addMsg('user', ev.text); lastSent = null; break;
     case 'delta': onDelta(ev.text); break;
-    case 'tool': replyEl = null; addMsg('tool', `${ev.sub ? '↳ ' : ''}${ev.name}${ev.detail ? ': ' + ev.detail : ''}`); break;
+    case 'tool': replyEl = null; addMsg('tool', `${ev.sub ? '↳ ' : ''}${ev.label || friendlyTool(ev.name)}`); break;
     case 'done': onDone(); break;
     case 'error': replyEl = null; addMsg('error', ev.message); chime(220); break;
     case 'reminder':
@@ -1252,5 +1260,21 @@ if (new URLSearchParams(location.search).has('app') && navigator.permissions) {
   navigator.permissions.query({ name: 'microphone' })
     .then((p) => { if (p.state === 'granted' && $('boot')) $('bootBtn').click(); })
     .catch(() => {});
+}
+
+// Settings panel: model, voice, language, wake word and New chat live here to keep the top bar short.
+$('settingsBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const open = $('settingsPanel').hidden;
+  $('settingsPanel').hidden = !open;
+  $('settingsBtn').setAttribute('aria-expanded', String(open));
+});
+document.addEventListener('click', (e) => {
+  if (!$('settingsPanel').hidden && !e.target.closest('#settingsPanel, #settingsBtn')) { $('settingsPanel').hidden = true; $('settingsBtn').setAttribute('aria-expanded', 'false'); }
+});
+// Plain phrase for a tool call (the server normally sends ev.label); raw commands are never shown.
+function friendlyTool(name = '') {
+  const map = { Screenshot: 'Looking at your screen…', Read: 'Reading a file…', Write: 'Writing a file…', Edit: 'Editing a file…', Bash: 'Working on it…', Grep: 'Searching files…', Glob: 'Looking for files…', WebSearch: 'Searching the web…', WebFetch: 'Reading a web page…', Task: 'Asking a helper…', Agent: 'Asking a helper…', TodoWrite: 'Planning…' };
+  return map[name] || (name.startsWith('mcp__') ? 'Using a connector…' : 'Working on it…');
 }
 </script>

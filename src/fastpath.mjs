@@ -3,7 +3,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import * as reminders from './reminders.mjs';
 
 const WAKE = /^(hey |ok |okay )?(eve|eva|evie|ibe|ebe|eba|evy)[,.!\s]+/i;
@@ -50,6 +51,17 @@ const MEDIA = { play: 179, resume: 179, pause: 179, 'play pause': 179, next: 176
 const UNIT_MS = { second: 1000, minute: 60000, hour: 3600000 };
 
 const MATCHERS = [
+  {
+    // "take a screenshot", "what's on my screen", "look at my screen": capture now, then the model describes it in one step.
+    name: 'screen',
+    re: /^(?:(?:take|grab|get) (?:a )?(?:screenshot|screen ?shot|screen capture)(?: of (?:my|the) screen)?(?: and (?:tell me what you see|describe it))?|what(?:'?s| is) on (?:my|the) screen|what do you see on (?:my|the) screen|(?:look at|check|describe) (?:my|the) screen)$/,
+    run: (m, cfg, dry) => {
+      if (dry) return 'ok';
+      const tool = fileURLToPath(new URL('../tools/screenshot.mjs', import.meta.url));
+      const file = execFileSync(process.execPath, [tool, '--max', '1600'], { encoding: 'utf8', timeout: 25000, windowsHide: true }).trim();
+      return { image: file, ask: 'Here is a screenshot of my screen, taken just now. Describe what is on it in two or three short spoken sentences, focusing on what matters. No tool calls needed.' };
+    },
+  },
   {
     // "volume up", "turn the volume down a lot", "louder", "mute", "unmute"
     name: 'volume',
@@ -134,7 +146,7 @@ const MATCHERS = [
   },
 ];
 
-/** Returns { name, reply } when a request can be handled without the model, else null. */
+/** Returns { name, reply } when a request can be handled without the model, { name, image, ask } for a one-step model call, else null. */
 export function fastPath(text, cfg, { dryRun = false } = {}) {
   if (cfg.fastPaths === false || text.length > 140 || /\[System note/i.test(text)) return null;
   const t = clean(text);
@@ -143,6 +155,7 @@ export function fastPath(text, cfg, { dryRun = false } = {}) {
     if (!m) continue;
     try {
       const reply = f.run(m, cfg, dryRun);
+      if (reply && typeof reply === 'object') return { name: f.name, ...reply }; // { image, ask }: goes to the model with the image
       if (reply) return { name: f.name, reply };
     } catch {
       return null; // any hiccup: let Eve handle it properly
