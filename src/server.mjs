@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { Brain, spentToday } from './brain.mjs';
+import { Brain, spentToday, readHistory } from './brain.mjs';
 import { checkHealth, healthPage } from './health.mjs';
 import { loadConfig, ROOT } from './config.mjs';
 import { startReminderLoop } from './reminders.mjs';
@@ -189,6 +189,7 @@ const routes = {
       json(res, 500, { error: e.message });
     }
   },
+  'GET /api/history': async (req, res) => json(res, 200, { items: readHistory(100) }),
   'POST /api/ui-state': async (req, res) => {
     const { state } = await readJson(req);
     if (['idle', 'listening', 'thinking', 'speaking'].includes(state)) uiState = state;

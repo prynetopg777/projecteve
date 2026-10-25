@@ -129,6 +129,18 @@
     box-shadow: 0 16px 40px rgba(0, 0, 0, .5);
   }
   .settings[hidden] { display: none; }
+  .histpanel {
+    position: fixed; inset: 64px max(var(--s4), calc(50% - 360px)) var(--s4); z-index: 30;
+    display: flex; flex-direction: column; border: 1px solid var(--line-2); border-radius: var(--r-md);
+    background: var(--bg-2); box-shadow: 0 16px 40px rgba(0, 0, 0, .5);
+  }
+  .histpanel[hidden] { display: none; }
+  .histhead { display: flex; justify-content: space-between; align-items: center; padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); }
+  .histlist { overflow-y: auto; padding: var(--s2) var(--s4); font-size: var(--fs-sm); color: var(--text-2); }
+  .histitem { padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
+  .histitem time { font-size: 12px; color: var(--text-3, var(--text-2)); }
+  .histitem p { margin: var(--s1) 0 0; white-space: pre-wrap; }
+  .histitem .q { color: var(--text); font-weight: 600; }
   .settings label, .settings .row {
     display: flex; justify-content: space-between; align-items: center; gap: var(--s3);
     padding: var(--s2); font-size: var(--fs-sm); color: var(--text-2); border-radius: var(--r-sm);
@@ -365,11 +377,16 @@
         <label>Listening <select id="langSel" title="Language Eve listens for"><option value="fil-PH">Filipino / Taglish</option><option value="en-PH">English (PH)</option><option value="en-US">English (US)</option></select></label>
         <div class="row">Wake word <button id="wakeBtn" aria-pressed="false" title="Listen continuously for the wake word"><span class="tick" aria-hidden="true"></span><span id="wakeLabel">Off</span></button></div>
         <hr>
+        <button id="histBtn" class="wide" title="Past conversations">History</button>
         <button id="newBtn" class="wide" title="Clears the transcript. Long-term memory is kept.">Start a new chat</button>
       </div>
     </div>
   </header>
 
+  <div class="histpanel" id="histPanel" role="dialog" aria-modal="true" aria-label="Conversation history" hidden>
+    <div class="histhead"><strong>History</strong><button id="histClose" aria-label="Close history">Close</button></div>
+    <div class="histlist" id="histList" tabindex="0"></div>
+  </div>
   <main>
     <div class="banner" id="banner" role="status" hidden><span>Eve's interface was updated.</span><button id="reloadBtn">Reload</button></div>
     <div class="stage">
@@ -438,7 +455,6 @@ const fx = (() => {
     for (const v of samples) sum += v * v;
     return Math.min(1, Math.sqrt(sum / samples.length) * 7);
   }
-  const sparks = Array.from({ length: 36 }, () => ({ a: Math.random() * 6.28, r: .55 + Math.random() * .4, s: .3 + Math.random() * .9, z: Math.random() }));
 
   function fit(c) {
     const dpr = Math.min(devicePixelRatio || 1, 2), w = c.clientWidth * dpr, h = c.clientHeight * dpr;
@@ -460,7 +476,7 @@ const fx = (() => {
 
     // Rotating segmented rings
     oc.lineCap = 'round';
-    [[1.18, 1, 3, 1.6], [1.05, -1.6, 5, 1], [.93, 2.3, 2, 2.2]].forEach(([k, dir, segs, lw], i) => {
+    [[1.12, 1, 3, 1.4], [.95, -1.4, 2, 2]].forEach(([k, dir, segs, lw], i) => {
       const rot = t * cur[4] * dir * .6 + i;
       oc.strokeStyle = rgba(.55 - i * .1); oc.lineWidth = lw * (W / 300);
       oc.shadowColor = rgba(.9); oc.shadowBlur = 10 * (W / 300);
@@ -470,21 +486,6 @@ const fx = (() => {
       }
     });
     oc.shadowBlur = 0;
-
-    // Tick marks on the outer ring
-    oc.strokeStyle = rgba(.25); oc.lineWidth = W / 400;
-    for (let i = 0; i < 72; i++) {
-      const a = (i / 72) * Math.PI * 2 - t * .05, r0 = R * 1.28, r1 = R * (i % 6 ? 1.31 : 1.35);
-      oc.beginPath(); oc.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0); oc.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); oc.stroke();
-    }
-
-    // Orbiting sparks (dense and fast while thinking)
-    const sparkAlpha = state === 'thinking' ? .9 : state === 'idle' ? .25 : .5;
-    for (const p of sparks) {
-      p.a += .004 * p.s * cur[4] * 3;
-      const rr = R * (p.r + .08 * Math.sin(t * p.s + p.z * 6)), x = cx + Math.cos(p.a) * rr, y = cy + Math.sin(p.a) * rr * (.9 + .1 * p.z);
-      oc.fillStyle = rgba(sparkAlpha * (.4 + .6 * p.z)); oc.beginPath(); oc.arc(x, y, (1 + p.z * 1.6) * (W / 300), 0, 7); oc.fill();
-    }
 
     // Liquid core: a circle deformed by layered sines; amplitude follows energy
     const coreR = R * (.52 + e * .1), pts = 96;
@@ -1360,7 +1361,13 @@ $('input').addEventListener('input', syncComposer);
 $('form').onsubmit = (e) => { e.preventDefault(); send($('input').value); $('input').value = ''; syncComposer(); };
 $('hints').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) send(b.textContent); });
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('histPanel').hidden) { closeHistory(); return; }
   if (e.key === 'Escape' && !$('settingsPanel').hidden) { closeSettings(); $('settingsBtn').focus(); return; }
+  // Keep Tab inside the History dialog while it's open.
+  if (e.key === 'Tab' && !$('histPanel').hidden) {
+    const f = [$('histClose'), $('histList')], i = f.indexOf(document.activeElement);
+    e.preventDefault(); f[(i + (e.shiftKey ? f.length - 1 : 1)) % f.length].focus();
+  }
   if (e.key === 'Escape') stopAll();
   if (e.code === 'Space' && e.ctrlKey) { e.preventDefault(); talk(); }
 });
@@ -1395,6 +1402,32 @@ $('settingsBtn').addEventListener('click', (e) => {
   $('settingsBtn').setAttribute('aria-expanded', String(open));
 });
 function closeSettings() { $('settingsPanel').hidden = true; $('settingsBtn').setAttribute('aria-expanded', 'false'); }
+// History: past exchanges from data/history.jsonl, newest first. Read-only; the transcript isn't replaced.
+$('histBtn').onclick = async () => {
+  closeSettings();
+  const list = $('histList');
+  list.textContent = 'Loading…';
+  $('histPanel').hidden = false;
+  $('histClose').focus();
+  try {
+    const { items } = await (await fetch('/api/history')).json();
+    list.textContent = items.length ? '' : 'No past conversations yet.';
+    for (const it of items) {
+      const el = document.createElement('article');
+      el.className = 'histitem';
+      const when = document.createElement('time');
+      when.textContent = new Date(it.ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+      const q = document.createElement('p'); q.className = 'q'; q.textContent = it.user;
+      const a = document.createElement('p'); a.className = 'a'; a.textContent = it.eve;
+      el.append(when, q, a);
+      list.append(el);
+    }
+  } catch {
+    list.textContent = "Couldn't load history. Is Eve's server running?";
+  }
+};
+function closeHistory() { $('histPanel').hidden = true; $('settingsBtn').focus(); }
+$('histClose').onclick = closeHistory;
 document.addEventListener('click', (e) => {
   if (!$('settingsPanel').hidden && !e.target.closest('#settingsPanel, #settingsBtn')) closeSettings();
 });

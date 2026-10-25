@@ -27,18 +27,27 @@ const OWN_TOOLS = {
 const READ_ONLY =
   /^(Get-[A-Za-z]+|Select-Object|Where-Object|Sort-Object|Format-(Table|List)|Measure-Object|Select-String|Test-Path|Resolve-Path|Split-Path|Join-Path|Out-String|ls|dir|pwd|cd|whoami|hostname|date|echo|cat|type|head|tail|wc|grep|findstr|find|where|which|tasklist|systeminfo|ipconfig|ping|nslookup|Test-Connection|Resolve-DnsName|Write-(Output|Host)|ConvertTo-(Json|Csv)|node\s+(-v|--version|--check)|npm\s+(-v|--version|ls|list)|git\s+(status|log|diff|show|branch|ls-files))(?=\s|$)/i;
 // Writers hidden inside otherwise read-only commands (redirects, git branch -d/-m/-c, --output=file, ...).
-const WRITES = /(^|[^-])>|\$\(|`|\bOut-File\b|\bSet-Content\b|\bAdd-Content\b|\bTee-Object\b|\bfind\b.*-(delete|exec)|--output\b|\s-(o|OutFile)\b|\bgit\s+branch\b.*\s(-[a-z]*[dDmMcCfu]|--(delete|move|copy|force|set-upstream-to|unset-upstream|edit-description))\b/i;
+// Also code runners: a lone & (background in bash, call operator in PowerShell), <(...) process substitution,
+// .NET static calls (::) and method calls (.Delete()), which run code inside an innocent-looking command.
+const WRITES = /(^|[^-])>|\$\(|`|(^|[^&])&(?!&)|<\(|::|\.\w+\s*\(|\bOut-File\b|\bSet-Content\b|\bAdd-Content\b|\bTee-Object\b|\bfind\b.*-(delete|exec|ok|fprint|fls)|--output\b|--ext-diff\b|\s-(o|OutFile)\b|\bgit\s+branch\b.*\s(-[a-z]*[dDmMcCfu]|--(delete|move|copy|force|set-upstream-to|unset-upstream|edit-description))\b/i;
+// Inside PowerShell (...) and {...} (e.g. Where-Object filters) a piece may also be a plain expression:
+// `$_.Length -gt 1MB`. Assignments are not plain: `$x = Remove-Item y` runs the right-hand side.
+const EXPRESSION = /^[-$!\d"]/;
 
 // Opening an app, file or website: `Start-Process spotify`, `start https://...`, `Invoke-Item x.pdf`.
 // No arguments, and never an interpreter/shell (that would be running code, not opening something).
-const OPEN = /^(Start-Process(\s+-FilePath)?|start|Invoke-Item|ii|explorer(\.exe)?)\s+("[^"]+"|'[^']+'|[^\s;&|<>`$]+)\s*$/i;
+// The target can't hold a subexpression: `Start-Process (iex ...)` or `"$(...)"` would run code first.
+const OPEN = /^(Start-Process(\s+-FilePath)?|start|Invoke-Item|ii|explorer(\.exe)?)\s+("[^"$`]+"|'[^']+'|[^\s;&|<>`$()[\]{}'"@,]+)\s*$/i;
 const INTERPRETER = /^(.*[\\/])?(powershell|pwsh|cmd|wscript|cscript|mshta|node|python[0-9.]*|py|pythonw|rundll32|regsvr32|bash|sh|wsl|msiexec|certutil|bitsadmin|schtasks|reg|wmic|conhost|forfiles|installutil|regasm|regsvcs|msbuild|hh)(\.(exe|com|cmd|bat))?$/i;
 const SCRIPT_FILE = /\.(bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|hta|msi|scr|py|lnk|reg|com|pif|cpl)$/i;
-function isOpen(cmd) {
+// strict (after web content): only websites and plain app names like `spotify`, never a path to a file
+// that a page may have talked Eve into fetching.
+function isOpen(cmd, strict = false) {
   const m = cmd.match(OPEN);
   if (!m) return false;
   const target = m[4].replace(/^["']|["']$/g, '').trim();
   if (/^https?:\/\//i.test(target)) return true;
+  if (strict && !/^[\w -]+$/.test(target)) return false;
   return !INTERPRETER.test(target) && !SCRIPT_FILE.test(target);
 }
 
@@ -55,18 +64,25 @@ const PROTECTED_NORM = PROTECTED_FILES.map(norm);
 const stripQuotes = (cmd) => cmd.replace(/"[^"]*"|'[^']*'/g, '""');
 const isSimple = (cmd) => !/[;&|<>`$\n]/.test(stripQuotes(cmd));
 
-function isReadOnly(cmd) {
+function isReadOnly(cmd, tool = 'Bash') {
   const bare = stripQuotes(cmd);
   if (WRITES.test(bare)) return false;
-  return bare.split(/&&|\|\||[;|\n]/).every((part) => !part.trim() || READ_ONLY.test(part.trim()));
+  const brackets = /[(){}]/.test(bare);
+  // In bash, ( ) and { } are subshells and command groups: never read-only. In PowerShell each piece inside
+  // them must itself be read-only, or a plain expression.
+  if (brackets && tool !== 'PowerShell') return false;
+  return bare.replace(/@?[(){}]/g, ';').split(/&&|\|\||[;|\n]/).every((part) => {
+    const p = part.trim();
+    return !p || READ_ONLY.test(p) || (brackets && EXPRESSION.test(p) && !/(^|[^-!<>=])=/.test(p));
+  });
 }
 
 // Several simple opens / read-only commands chained with ; or && ("open Spotify and Edge").
 // Each piece must be simple on its own, with balanced quotes, so a separator inside quotes can't split it.
-function isHarmlessChain(cmd) {
+function isHarmlessChain(cmd, tool, strict) {
   const parts = cmd.split(/\s*(?:;|&&)\s*/).filter(Boolean);
   return parts.length > 1 && parts.every((p) =>
-    p.split('"').length % 2 === 1 && p.split("'").length % 2 === 1 && isSimple(p) && (isOpen(p) || isOwnTool(p) || isReadOnly(p)));
+    p.split('"').length % 2 === 1 && p.split("'").length % 2 === 1 && isSimple(p) && (isOpen(p, strict) || isOwnTool(p) || isReadOnly(p, tool)));
 }
 
 function parseOwnTool(cmd) {
@@ -139,7 +155,7 @@ export function alwaysAsk(tool, input = {}, plan = '') {
     if (autoModeRequest(tool, input) === 'on') return true; // Eve can't put herself into auto mode
     if (autoModeRequest(tool, input)) return false; // `auto off` / `auto status` are always fine
     if (ALWAYS_ASK.test(cmd)) return true;
-    if (PROTECTED_SHELL.test(cmd) && isReadOnly(cmd)) return false;
+    if (PROTECTED_SHELL.test(cmd) && isReadOnly(cmd, tool)) return false;
     cmd = stripPlanNamed(cmd, plan);
     return PROTECTED_SHELL.test(cmd);
   }
@@ -175,7 +191,7 @@ export function isAutoAllowed(tool, input = {}, { grants = new Set(), taskActive
   if (grants.has(grantKey(tool, input))) return true;
   if (SHELLS.has(tool)) {
     const cmd = String(input.command || '').trim();
-    return (isSimple(cmd) && (isOwnTool(cmd) || isOpen(cmd))) || isReadOnly(cmd) || isHarmlessChain(cmd);
+    return (isSimple(cmd) && (isOwnTool(cmd) || isOpen(cmd, webTainted))) || isReadOnly(cmd, tool) || isHarmlessChain(cmd, tool, webTainted);
   }
   // Her notes, memory and to-dos live in workspace/. Her own source code does NOT, so editing it needs approval.
   if (FILE_TOOLS.has(tool)) return inside(input.file_path || input.notebook_path || '', WORKSPACE);

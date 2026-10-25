@@ -28,6 +28,7 @@ export const MODELS = ['haiku', 'sonnet', 'opus'];
 const PERMISSION_TIMEOUT_MS = 3 * 60 * 1000;
 const USAGE_FILE = path.join(DATA_DIR, 'usage.jsonl'); // one line per turn; summarised by tools/usage.mjs
 const WEB_TOOLS = new Set(['WebFetch', 'WebSearch']);
+const isWebTool = (name) => WEB_TOOLS.has(name) || name.startsWith('mcp__browser__'); // the browser connector reads pages too
 // Budget alerts (override any of these with a "budget" object in config.json). 0 turns a check off.
 const BUDGET = { turnUsd: 1.5, dailyUsd: 15, turnTokens: 1500000, contextTokens: 120000, toolCalls: 60, repeatCalls: 4, agents: 6, dailyHardUsd: 30 };
 
@@ -417,7 +418,7 @@ export class Brain extends EventEmitter {
     } else if (msg.type === 'assistant') {
       if (!msg.parent_tool_use_id && msg.message?.usage) turn.usage = msg.message.usage; // latest prompt size
       for (const block of msg.message?.content || []) {
-        if (block.type === 'tool_use' && WEB_TOOLS.has(block.name)) turn.webTainted = true;
+        if (block.type === 'tool_use' && isWebTool(block.name)) turn.webTainted = true;
         if (block.type === 'tool_use') {
           this.emit('tool', { name: block.name, input: block.input, sub: !!msg.parent_tool_use_id });
           this.#loopGuard(turn, block);
@@ -480,7 +481,7 @@ export class Brain extends EventEmitter {
     }
     const { tool_name: tool, input, description } = request;
     if (isTaskDone(tool, input)) this.endTask('done');
-    if (this.turn && WEB_TOOLS.has(tool)) this.turn.webTainted = true;
+    if (this.turn && isWebTool(tool)) this.turn.webTainted = true;
     // After reading the web this turn, auto mode / the task approval no longer cover shell or file actions.
     const webTainted = !!this.turn?.webTainted;
     const learned = !webTainted && this.#learned(tool, input);
@@ -563,6 +564,15 @@ export class Brain extends EventEmitter {
 // The last few exchanges, kept in a markdown file so a refreshed session can pick up the thread.
 const RECENT_FILE = path.join(WORKSPACE, 'memory/recent.md');
 const RECENT_KEEP = 10;
+const HISTORY_FILE = path.join(DATA_DIR, 'history.jsonl'); // every exchange, for the History view
+
+export function readHistory(n = 100) {
+  try {
+    return fs.readFileSync(HISTORY_FILE, 'utf8').split('\n').filter(Boolean).slice(-n).map((l) => JSON.parse(l)).reverse();
+  } catch {
+    return [];
+  }
+}
 const RECENT_HEADER = '# Recent conversation (auto-saved, newest last)\n';
 const clip = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s).trim();
 
@@ -573,6 +583,7 @@ function saveRecent(user, reply) {
     const kept = [...old, entry].slice(-RECENT_KEEP);
     fs.mkdirSync(path.dirname(RECENT_FILE), { recursive: true });
     fs.writeFileSync(RECENT_FILE, `${RECENT_HEADER}\n## ${kept.join('\n## ')}`);
+    fs.appendFileSync(HISTORY_FILE, JSON.stringify({ ts: new Date().toISOString(), user: clip(String(user), 1000), eve: clip(reply, 3000) }) + '\n');
   } catch {
     // best effort: never break a reply over the log
   }
