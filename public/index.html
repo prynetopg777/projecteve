@@ -159,6 +159,14 @@
   .msg.reminder { align-self: center; color: var(--amber); border: 1px solid rgba(255,181,71,.4); background: rgba(255,181,71,.08); box-shadow: 0 0 18px rgba(255,181,71,.12); }
   .msg.error { align-self: center; color: var(--red); border: 1px solid rgba(255,90,106,.4); background: rgba(255,90,106,.06); font-size: 13px; }
   .msg.system { align-self: center; color: var(--muted); font-size: 13px; border: 1px dashed var(--line); }
+  .viz { margin: 8px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(4, 12, 24, .75); white-space: normal; }
+  .viz-title { font-size: 13px; color: var(--cyan); margin-bottom: 6px; letter-spacing: .02em; }
+  .viz-svg { display: block; width: 100%; max-width: 460px; height: auto; }
+  .viz-t { font: 10px "Segoe UI", system-ui, sans-serif; fill: #8fb4c8; }
+  .viz-grid { stroke: rgba(120, 190, 220, .14); stroke-width: 1; }
+  .viz-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .viz-legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; background: var(--c); margin-right: 6px; }
+  .viz-wait { color: var(--muted); font-size: 12.5px; font-style: italic; }
   .tool { align-self: flex-start; font: 11.5px/1.4 "Cascadia Code", Consolas, monospace; color: var(--muted); padding-left: 6px; overflow-wrap: anywhere; opacity: .85; }
   .tool::before { content: "⚙ "; color: var(--cyan-dim); }
 
@@ -518,14 +526,134 @@ function renderReply(el, text) {
   el.replaceChildren();
   text.split(/(```[\s\S]*?(?:```|$))/).forEach((part) => {
     if (part.startsWith('```')) {
+      const lang = (/^```(\w*)/.exec(part)?.[1] || '').toLowerCase();
+      const body = part.replace(/^```[^\n]*\n?/, '').replace(/```$/, '');
+      const viz = (lang === 'chart' || lang === 'svg') && part.length > 7 && part.endsWith('```') ? drawViz(lang, body) : null;
+      if (viz) { el.append(viz); return; }
+      if (lang === 'chart' || lang === 'svg') { // still streaming (or malformed): placeholder instead of raw JSON/markup
+        const wait = document.createElement('div');
+        wait.className = 'viz-wait';
+        wait.textContent = part.endsWith('```') && part.length > 7 ? `(couldn't draw this ${lang})` : `drawing ${lang}…`;
+        el.append(wait);
+        return;
+      }
       const pre = document.createElement('pre');
-      pre.textContent = part.replace(/^```[^\n]*\n?/, '').replace(/```$/, '');
+      pre.textContent = body;
       el.append(pre);
     } else if (part) {
       el.append(part.replace(/\*\*(.+?)\*\*/g, '$1'));
     }
   });
   log.scrollTop = log.scrollHeight;
+}
+// ---------- Visualisations in replies ----------
+// ```chart {"type":"line|bar|pie|area","title":"…","x":[…],"series":[{"name":"…","data":[…]}],"yLabel":"…"}```
+// ```svg <svg …>…</svg>```  (sanitised: no scripts, no event handlers, no external links)
+const SVGNS = 'http://www.w3.org/2000/svg';
+const PALETTE = ['#38e8ff', '#ffb547', '#2dffc4', '#ff5a6a', '#a78bfa', '#f472b6', '#facc15', '#60a5fa'];
+function sv(tag, attrs = {}, text) {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  if (text != null) n.textContent = text;
+  return n;
+}
+const nice = (n) => (Math.abs(n) >= 1000 ? +(n / 1000).toFixed(1) + 'k' : +(+n).toFixed(2) + '');
+function wrapViz(svg, title, legend) {
+  const box = document.createElement('div');
+  box.className = 'viz';
+  if (title) { const t = document.createElement('div'); t.className = 'viz-title'; t.textContent = title; box.append(t); }
+  box.append(svg);
+  if (legend?.length) {
+    const l = document.createElement('div'); l.className = 'viz-legend';
+    legend.forEach(([name, color]) => { const s = document.createElement('span'); s.style.setProperty('--c', color); s.textContent = name; l.append(s); });
+    box.append(l);
+  }
+  return box;
+}
+function drawViz(lang, body) {
+  try { return lang === 'svg' ? drawSvg(body) : drawChart(JSON.parse(body)); } catch { return null; }
+}
+function drawSvg(src) {
+  const doc = new DOMParser().parseFromString(src, 'image/svg+xml');
+  const root = doc.documentElement;
+  if (root.nodeName !== 'svg' || doc.querySelector('parsererror')) return null;
+  root.querySelectorAll('script,foreignObject,iframe,object,embed,audio,video,style,animate,set').forEach((n) => n.remove());
+  for (const n of [root, ...root.querySelectorAll('*')]) {
+    for (const a of [...n.attributes]) {
+      const v = a.value.trim().toLowerCase();
+      if (/^on/i.test(a.name) || ((a.name === 'href' || a.name.endsWith(':href') || a.name === 'src') && !v.startsWith('#')) || /javascript:|url\s*\(\s*['"]?\s*(https?:|data:)/.test(v)) n.removeAttribute(a.name);
+    }
+  }
+  if (!root.getAttribute('viewBox')) root.setAttribute('viewBox', `0 0 ${parseFloat(root.getAttribute('width')) || 400} ${parseFloat(root.getAttribute('height')) || 300}`);
+  root.removeAttribute('width'); root.removeAttribute('height');
+  root.setAttribute('class', 'viz-svg');
+  return wrapViz(document.importNode(root, true), '');
+}
+function drawChart(c) {
+  const type = c.type || 'bar';
+  const labels = (c.x || c.labels || []).map(String);
+  const series = (c.series || [{ name: '', data: c.data || [] }]).map((s, i) => ({ name: s.name || '', data: (s.data || []).map(Number), color: s.color || PALETTE[i % PALETTE.length] }));
+  if (!series.length || !series[0].data.length || series.some((s) => s.data.some((v) => !isFinite(v)))) return null;
+  const n = Math.max(...series.map((s) => s.data.length));
+  const legend = type === 'pie' ? [] : series.filter((s) => s.name).map((s) => [s.name, s.color]);
+
+  if (type === 'pie') {
+    const data = series[0].data.map((v) => Math.max(0, v)), total = data.reduce((a, b) => a + b, 0) || 1;
+    const svg = sv('svg', { viewBox: '0 0 320 190', class: 'viz-svg' });
+    let a0 = -Math.PI / 2;
+    data.forEach((v, i) => {
+      const a1 = a0 + (v / total) * Math.PI * 2, big = a1 - a0 > Math.PI ? 1 : 0, r = 80, cx = 95, cy = 95;
+      const p = (a) => `${cx + r * Math.cos(a)} ${cy + r * Math.sin(a)}`;
+      svg.append(v / total > 0.9999
+        ? sv('circle', { cx, cy, r, fill: PALETTE[i % PALETTE.length] })
+        : sv('path', { d: `M${cx} ${cy} L${p(a0)} A${r} ${r} 0 ${big} 1 ${p(a1)} Z`, fill: PALETTE[i % PALETTE.length], stroke: '#06101c', 'stroke-width': 1.5 }));
+      svg.append(sv('rect', { x: 205, y: 14 + i * 20, width: 10, height: 10, rx: 2, fill: PALETTE[i % PALETTE.length] }));
+      svg.append(sv('text', { x: 221, y: 23 + i * 20, class: 'viz-t' }, `${labels[i] ?? i + 1}  ${Math.round((v / total) * 100)}%`));
+      a0 = a1;
+    });
+    svg.setAttribute('viewBox', `0 0 320 ${Math.max(190, 30 + data.length * 20)}`);
+    return wrapViz(svg, c.title);
+  }
+
+  const W = 420, H = 230, L = 46, R = 14, T = 12, B = 34, pw = W - L - R, ph = H - T - B;
+  const all = series.flatMap((s) => s.data);
+  let lo = Math.min(0, ...all), hi = Math.max(0, ...all);
+  if (hi === lo) hi = lo + 1;
+  const span = hi - lo, step = Math.pow(10, Math.floor(Math.log10(span / 4))), m = span / 4 / step;
+  const tick = (m > 5 ? 10 : m > 2 ? 5 : m > 1 ? 2 : 1) * step;
+  lo = Math.floor(lo / tick) * tick; hi = Math.ceil(hi / tick) * tick;
+  const y = (v) => T + ph - ((v - lo) / (hi - lo)) * ph;
+  const x = (i) => L + (type === 'bar' ? ((i + 0.5) / n) * pw : n === 1 ? pw / 2 : (i / (n - 1)) * pw);
+  const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, class: 'viz-svg' });
+  for (let v = lo; v <= hi + tick / 2; v += tick) {
+    svg.append(sv('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), class: 'viz-grid' }));
+    svg.append(sv('text', { x: L - 6, y: y(v) + 3.5, class: 'viz-t', 'text-anchor': 'end' }, nice(v)));
+  }
+  const every = Math.ceil(n / 8);
+  labels.slice(0, n).forEach((lab, i) => i % every === 0 && svg.append(sv('text', { x: x(i), y: H - B + 15, class: 'viz-t', 'text-anchor': 'middle' }, lab.length > 10 ? lab.slice(0, 9) + '…' : lab)));
+  if (c.yLabel) svg.append(sv('text', { x: 4, y: 10, class: 'viz-t' }, c.yLabel));
+  series.forEach((s, si) => {
+    if (type === 'bar') {
+      const bw = Math.min(34, (pw / n) * 0.8 / series.length);
+      s.data.forEach((v, i) => {
+        const bx = x(i) - (bw * series.length) / 2 + si * bw, y0 = y(Math.max(0, lo)), yv = y(v);
+        const bar = sv('rect', { x: bx, y: Math.min(yv, y0), width: bw - 1.5, height: Math.max(1, Math.abs(y0 - yv)), rx: 2, fill: s.color });
+        bar.append(sv('title', {}, `${s.name ? s.name + ' · ' : ''}${labels[i] ?? i + 1}: ${nice(v)}`));
+        svg.append(bar);
+        if (n * series.length <= 12) svg.append(sv('text', { x: bx + (bw - 1.5) / 2, y: Math.min(yv, y0) - 3, class: 'viz-t', 'text-anchor': 'middle' }, nice(v)));
+      });
+    } else {
+      const pts = s.data.map((v, i) => `${x(i)},${y(v)}`);
+      if (type === 'area') svg.append(sv('polygon', { points: `${x(0)},${y(Math.max(0, lo))} ${pts.join(' ')} ${x(s.data.length - 1)},${y(Math.max(0, lo))}`, fill: s.color, opacity: 0.18 }));
+      svg.append(sv('polyline', { points: pts.join(' '), fill: 'none', stroke: s.color, 'stroke-width': 2.2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+      s.data.forEach((v, i) => {
+        const dot = sv('circle', { cx: x(i), cy: y(v), r: 3, fill: s.color });
+        dot.append(sv('title', {}, `${s.name ? s.name + ' · ' : ''}${labels[i] ?? i + 1}: ${nice(v)}`));
+        svg.append(dot);
+      });
+    }
+  });
+  return wrapViz(svg, c.title, legend);
 }
 function chime(freq = 880) {
   try {
