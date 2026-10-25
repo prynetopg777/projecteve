@@ -21,6 +21,8 @@ export const MODELS = ['haiku', 'sonnet', 'opus'];
 const PERMISSION_TIMEOUT_MS = 3 * 60 * 1000;
 const USAGE_FILE = path.join(DATA_DIR, 'usage.jsonl'); // one line per turn; summarised by tools/usage.mjs
 const WEB_TOOLS = new Set(['WebFetch', 'WebSearch']);
+// Budget alerts (override any of these with a "budget" object in config.json). 0 turns a check off.
+const BUDGET = { turnUsd: 1.5, dailyUsd: 15, turnTokens: 1500000, contextTokens: 120000, toolCalls: 60, repeatCalls: 4 };
 
 export class Brain extends EventEmitter {
   constructor(cfg) {
@@ -39,6 +41,8 @@ export class Brain extends EventEmitter {
     this.autoMode = !!readJson(SETTINGS_FILE).autoMode; // act without permission prompts (except the always-ask list)
     this.turns = 0; // turns since this conversation (re)started in this run
     this.refreshDue = false; // context got heavy: start a fresh session at the next quiet moment
+    this.budget = { ...BUDGET, ...(cfg.budget || {}) };
+    this.escalate = null; // on Auto: a failed turn bumps the next one up a model
   }
 
   /**
@@ -193,10 +197,16 @@ export class Brain extends EventEmitter {
       new Promise((resolve, reject) => {
         // Eve switched models during the last turn: restart the process on the new model, same conversation.
         this.#maybeRefresh();
-        if (readJson(MODEL_FILE).model === 'auto') this.autoPick = this.#takeHint() || this.#pickModel(text);
+        let escalated = false;
+        if (readJson(MODEL_FILE).model === 'auto') {
+          const pick = this.#takeHint() || this.#pickModel(text);
+          escalated = !!this.escalate && MODELS.indexOf(this.escalate) > MODELS.indexOf(pick);
+          this.autoPick = escalated ? this.escalate : pick;
+          this.escalate = null;
+        }
         if (this.proc && this.runningModel !== this.model) this.#kill();
         if (!this.proc) this.start();
-        this.turn = { resolve, reject, text: '', messages: 0, userText: text };
+        this.turn = { resolve, reject, text: '', messages: 0, userText: text, started: Date.now(), firstToken: 0, tools: 0, sigs: new Map(), escalated };
         this.emit('busy', true);
         this.#briefingNote();
         const notes = this.notes.splice(0).map((n) => `[System note: ${n}]\n`).join('');
@@ -334,13 +344,17 @@ export class Brain extends EventEmitter {
         this.#delta('\n\n');
       }
       if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && !msg.parent_tool_use_id) {
+        turn.firstToken ||= Date.now();
         this.#delta(ev.delta.text);
       }
     } else if (msg.type === 'assistant') {
       if (!msg.parent_tool_use_id && msg.message?.usage) turn.usage = msg.message.usage; // latest prompt size
       for (const block of msg.message?.content || []) {
         if (block.type === 'tool_use' && WEB_TOOLS.has(block.name)) turn.webTainted = true;
-        if (block.type === 'tool_use') this.emit('tool', { name: block.name, input: block.input, sub: !!msg.parent_tool_use_id });
+        if (block.type === 'tool_use') {
+          this.emit('tool', { name: block.name, input: block.input, sub: !!msg.parent_tool_use_id });
+          this.#loopGuard(turn, block);
+        }
       }
     } else if (msg.type === 'result') {
       this.turn = null;
@@ -350,7 +364,22 @@ export class Brain extends EventEmitter {
       if (this.cfg.autoRefresh !== false && (tokens >= (this.cfg.refreshTokens || 60000) || ++this.turns >= (this.cfg.refreshTurns || 40))) {
         this.refreshDue = true;
       }
-      logUsage(this.runningModel, msg.usage);
+      const failed = !turn.interrupted && (msg.is_error || msg.subtype !== 'success');
+      const entry = logUsage(this.runningModel, msg.usage, {
+        cost_usd: msg.total_cost_usd || 0,
+        ms: Date.now() - turn.started,
+        ttft_ms: turn.firstToken ? turn.firstToken - turn.started : 0,
+        api_ms: msg.duration_api_ms || 0,
+        model_calls: msg.num_turns || 0,
+        tool_calls: turn.tools,
+        context: tokens,
+        auto: readJson(MODEL_FILE).model === 'auto',
+        escalated: !!turn.escalated,
+        status: turn.interrupted ? 'interrupted' : failed ? 'error' : 'ok',
+      });
+      this.#checkBudget(entry);
+      // Auto routing: a failed turn on a lighter model retries the next message one model up.
+      if (failed && readJson(MODEL_FILE).model === 'auto') this.escalate = MODELS[Math.min(MODELS.indexOf(this.runningModel) + 1, MODELS.length - 1)];
       setImmediate(() => this.#maybeRefresh()); // after this turn settles; skipped if another turn already started
       // A plan approval covers one reply. The exception is a self-restart, after which the plan may carry on.
       if (!this.holdTask) this.endTask('done');
@@ -391,6 +420,41 @@ export class Brain extends EventEmitter {
     this.emit('permission', req);
   }
 
+  /** Stop runaway turns: too many tool calls, or the same call over and over. */
+  #loopGuard(turn, block) {
+    if (turn.interrupted || turn.guarded) return;
+    turn.tools++;
+    const sig = block.name + JSON.stringify(block.input || {});
+    const seen = (turn.sigs.get(sig) || 0) + 1;
+    turn.sigs.set(sig, seen);
+    const { toolCalls, repeatCalls } = this.budget;
+    const why = repeatCalls && seen >= repeatCalls ? `called ${block.name} with the same input ${seen} times`
+      : toolCalls && turn.tools >= toolCalls ? `made ${turn.tools} tool calls in one reply` : '';
+    if (!why) return;
+    turn.guarded = true;
+    this.note(`Loop guard: your last reply was stopped because it ${why}. Tell the user briefly what you were trying to do and where it got stuck, and ask how to proceed instead of repeating it.`);
+    this.emit('alert', `Loop guard stopped a reply: it ${why}.`);
+    this.interrupt();
+  }
+
+  /** Spending and context alerts, passed to Eve as a note so she can mention them. */
+  #checkBudget(e) {
+    if (!e) return;
+    const b = this.budget, alerts = [];
+    if (b.turnUsd && e.cost_usd >= b.turnUsd) alerts.push(`that reply cost about $${e.cost_usd.toFixed(2)} (limit $${b.turnUsd})`);
+    if (b.turnTokens && e.total >= b.turnTokens) alerts.push(`that reply used ${Math.round(e.total / 1000)}k tokens`);
+    if (b.contextTokens && e.context >= b.contextTokens) alerts.push(`the conversation context is at ${Math.round(e.context / 1000)}k tokens`);
+    if (b.dailyUsd) {
+      const today = spentToday();
+      const prev = today - e.cost_usd;
+      if (today >= b.dailyUsd && prev < b.dailyUsd) alerts.push(`today's spending passed $${b.dailyUsd} (now about $${today.toFixed(2)})`);
+    }
+    if (!alerts.length) return;
+    const text = `Budget alert: ${alerts.join('; ')}.`;
+    this.note(`${text} Mention it to the user in one short sentence, and prefer lighter models and fewer tool calls for a while.`);
+    this.emit('alert', text);
+  }
+
   #delta(text) {
     this.turn.text += text;
     this.emit('delta', text);
@@ -424,17 +488,30 @@ function saveRecent(user, reply) {
   }
 }
 
-// Token usage of a whole turn (all API calls in it), appended to data/usage.jsonl.
-function logUsage(model, u = {}) {
+// Token usage of a whole turn (all API calls in it) plus cost, timing and call counts, appended to data/usage.jsonl.
+function logUsage(model, u = {}, extra = {}) {
   try {
     const input = u.input_tokens || 0;
     const cacheRead = u.cache_read_input_tokens || 0;
     const cacheCreation = u.cache_creation_input_tokens || 0;
     const output = u.output_tokens || 0;
-    const entry = { ts: new Date().toISOString(), model, input, cache_read: cacheRead, cache_creation: cacheCreation, output, total: input + cacheRead + cacheCreation + output };
+    const entry = { ts: new Date().toISOString(), model, input, cache_read: cacheRead, cache_creation: cacheCreation, output, total: input + cacheRead + cacheCreation + output, ...extra };
     fs.appendFileSync(USAGE_FILE, JSON.stringify(entry) + '\n');
+    return entry;
   } catch {
-    // best effort
+    return null; // best effort
+  }
+}
+
+// Dollars spent since local midnight, from the usage log.
+function spentToday() {
+  try {
+    const today = new Date().toDateString();
+    return fs.readFileSync(USAGE_FILE, 'utf8').split('\n').reduce((sum, l) => {
+      try { const r = JSON.parse(l); return new Date(r.ts).toDateString() === today ? sum + (r.cost_usd || 0) : sum; } catch { return sum; }
+    }, 0);
+  } catch {
+    return 0;
   }
 }
 

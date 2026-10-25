@@ -12,7 +12,10 @@ Details that don't need to be in every conversation. Paths are relative to Eve's
 - Without `--repeat` a watcher fires once and is removed. When one triggers, the alert is spoken automatically.
 
 ## Usage and screen
-- `node tools/usage.mjs [days]` summarises token usage per day and model (from data/usage.jsonl).
+- `node tools/usage.mjs [days]` summarises usage per day and model (from data/usage.jsonl): tokens, cache hit rate, cost, cost per successful task, model and tool calls, average time and time to first token, local tok/s, ok/error/interrupted counts and escalations. Add `--html` for a browser dashboard with system stats; `usage.mjs sys` prints CPU, RAM, GPU and VRAM.
+- Budgets (defaults in src/brain.mjs, override with a `"budget"` object in config.json): `turnUsd` 1.5, `dailyUsd` 15, `turnTokens` 1.5M, `contextTokens` 120k, `toolCalls` 60 and `repeatCalls` 4 per reply (the loop guard interrupts the reply). 0 disables a check. Alerts arrive as system notes.
+- On Auto, a reply that errors makes the next message run one model up (logged as an escalation). Context refreshes at `refreshTokens`/`refreshTurns`; prompt caching is handled by the Claude CLI.
+- `node tools/local.mjs [--model name] [--max n] [--json] "prompt"` runs a local Ollama model (starts the server if needed); `local.mjs models` lists them.
 - `node tools/screenshot.mjs` saves the primary screen to data/screen.png and prints the path; then Read that image. Only when the user asks about their screen.
 
 ## Improving yourself

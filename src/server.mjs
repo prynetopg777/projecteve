@@ -34,6 +34,8 @@ brain.on('model', (model) => broadcast({ type: 'model', model, pref: brain.model
 brain.on('task', (task, reason) => broadcast({ type: 'task', task, reason }));
 brain.on('auto', (on) => { console.log(on ? '⚡ Auto mode ON: Eve acts without asking' : '🔐 Auto mode off'); broadcast({ type: 'auto', on }); });
 brain.on('refreshed', () => { console.log('🧹 Context refreshed: fresh session (memory kept)'); broadcast({ type: 'refreshed' }); });
+// Budget alerts reach Eve as a note on the next message; a loop-guard stop is also spoken now, since that reply was cut off.
+brain.on('alert', (text) => { console.log(`💸 ${text}`); if (text.startsWith('Loop guard') && clients.size) broadcast({ type: 'reminder', text }); });
 brain.on('permission-resolved', (ev) => broadcast({ type: 'permission-resolved', ...ev }));
 brain.on('permission', (req) => {
   console.log(`🔐 Asking permission to ${req.title}`);
