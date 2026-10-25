@@ -8,8 +8,37 @@
 //   node tools/memory.mjs graph "Mom"        (everything connected to a name)
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { DATA_DIR } from '../src/config.mjs';
+
+const GRAPH_HTML = `<!doctype html><meta charset="utf-8"><title>Eve's knowledge graph</title>
+<style>html,body{margin:0;height:100%;background:#0b0f1a;overflow:hidden;font-family:system-ui,sans-serif}canvas{display:block}
+#t{position:fixed;top:12px;left:16px;color:#7dd3fc;font-size:14px;opacity:.8}</style>
+<div id="t">Eve's knowledge graph &middot; drag nodes to move them</div><canvas id="c"></canvas>
+<script>
+const edges=__EDGES__, c=document.getElementById('c'), x=c.getContext('2d');
+const nodes=new Map(), key=(s)=>s.toLowerCase();
+const node=(n)=>{const k=key(n);if(!nodes.has(k))nodes.set(k,{n,x:innerWidth/2+(Math.random()-.5)*300,y:innerHeight/2+(Math.random()-.5)*300,vx:0,vy:0,d:0});return nodes.get(k)};
+const links=edges.map(e=>{const a=node(e.a),b=node(e.b);a.d++;b.d++;return{a,b,rel:e.rel}});
+const list=[...nodes.values()];let drag=null;
+function resize(){c.width=innerWidth;c.height=innerHeight}resize();onresize=resize;
+function step(){
+ for(const p of list)for(const q of list)if(p!==q){let dx=p.x-q.x,dy=p.y-q.y,d2=dx*dx+dy*dy+50,f=9000/d2,d=Math.sqrt(d2);p.vx+=dx/d*f;p.vy+=dy/d*f}
+ for(const l of links){let dx=l.b.x-l.a.x,dy=l.b.y-l.a.y,d=Math.hypot(dx,dy)||1,f=(d-170)*.02;l.a.vx+=dx/d*f;l.a.vy+=dy/d*f;l.b.vx-=dx/d*f;l.b.vy-=dy/d*f}
+ for(const p of list){p.vx+=(c.width/2-p.x)*.003;p.vy+=(c.height/2-p.y)*.003;if(p!==drag){p.x+=p.vx;p.y+=p.vy}p.vx*=.8;p.vy*=.8}
+}
+const r=(p)=>10+Math.min(p.d,8)*3;
+function draw(){
+ x.clearRect(0,0,c.width,c.height);x.font='12px system-ui';x.textAlign='center';
+ for(const l of links){x.strokeStyle='#334155';x.lineWidth=1.5;x.beginPath();x.moveTo(l.a.x,l.a.y);x.lineTo(l.b.x,l.b.y);x.stroke();
+  x.fillStyle='#94a3b8';x.fillText(l.rel,(l.a.x+l.b.x)/2,(l.a.y+l.b.y)/2-4)}
+ for(const p of list){x.fillStyle=p.d>2?'#38bdf8':'#818cf8';x.beginPath();x.arc(p.x,p.y,r(p),0,7);x.fill();x.fillStyle='#e2e8f0';x.fillText(p.n,p.x,p.y+r(p)+14)}
+}
+(function loop(){step();draw();requestAnimationFrame(loop)})();
+c.onmousedown=e=>{drag=list.find(p=>Math.hypot(p.x-e.clientX,p.y-e.clientY)<r(p)+4)||null};
+onmousemove=e=>{if(drag){drag.x=e.clientX;drag.y=e.clientY}};onmouseup=()=>drag=null;
+</script>`;
 
 process.removeAllListeners('warning');
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -50,6 +79,13 @@ if (cmd === 'add' && arg) {
   const notes = db.prepare('SELECT m.* FROM mem_fts f JOIN mem m ON m.id = f.rowid WHERE mem_fts MATCH ? LIMIT 5').all('"' + arg.replace(/"/g, '') + '"');
   notes.forEach(show);
   if (!rows.length && !notes.length) console.log('Nothing found.');
+} else if (cmd === 'view') {
+  // Standalone page (no server needed): a draggable force-directed picture of every edge. Opens in the browser.
+  const edges = db.prepare('SELECT a, rel, b FROM edge').all();
+  const file = path.join(DATA_DIR, 'graph.html');
+  fs.writeFileSync(file, GRAPH_HTML.replace('__EDGES__', JSON.stringify(edges).replace(/</g, '\\u003c')));
+  console.log(`Graph written to ${file} (${edges.length} links).`);
+  if (rest[0] !== '--no-open') spawn('cmd', ['/c', 'start', '', file], { detached: true, stdio: 'ignore' }).unref();
 } else {
-  console.log('Usage: add "text" [--tag x] | search "words" | list [n] | remove <id> | link "a" "relation" "b" | graph "name"');
+  console.log('Usage: add "text" [--tag x] | search "words" | list [n] | remove <id> | link "a" "relation" "b" | graph "name" | view');
 }
