@@ -362,6 +362,7 @@ export class Brain extends EventEmitter {
   /** Forget the current conversation (long-term memory files are kept). */
   reset() {
     this.stop();
+    try { fs.appendFileSync(HISTORY_FILE, JSON.stringify({ ts: new Date().toISOString(), reset: true }) + '\n'); } catch { /* best effort */ }
     this.sessionId = null;
     writeJson(SESSION_FILE, { sessionId: null });
     this.turns = 0;
@@ -566,9 +567,25 @@ const RECENT_FILE = path.join(WORKSPACE, 'memory/recent.md');
 const RECENT_KEEP = 10;
 const HISTORY_FILE = path.join(DATA_DIR, 'history.jsonl'); // every exchange, for the History view
 
-export function readHistory(n = 100) {
+// The first time, seed the log from memory/recent.md so History isn't empty.
+function backfillHistory() {
+  if (fs.existsSync(HISTORY_FILE) || !fs.existsSync(RECENT_FILE)) return;
+  const items = fs.readFileSync(RECENT_FILE, 'utf8').split('\n## ').slice(1).map((e) => {
+    const m = /^(.+?)\nUser: ([\s\S]*?)\nEve: ([\s\S]*)$/.exec(e.trim());
+    const ts = m && new Date(m[1].replace(/^\w+, /, '').replace(' at ', ' ').replace(/\s*\(.*\)$/, ''));
+    return m && !isNaN(ts) ? { ts: ts.toISOString(), user: m[2].trim(), eve: m[3].trim() } : null;
+  }).filter(Boolean);
+  fs.writeFileSync(HISTORY_FILE, items.map((i) => JSON.stringify(i) + '\n').join(''));
+}
+
+/** Past exchanges, newest first. sinceReset: only those after the last "Start a new chat". */
+export function readHistory(n = 100, { sinceReset = false } = {}) {
   try {
-    return fs.readFileSync(HISTORY_FILE, 'utf8').split('\n').filter(Boolean).slice(-n).map((l) => JSON.parse(l)).reverse();
+    backfillHistory();
+    let rows = fs.readFileSync(HISTORY_FILE, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    if (sinceReset) rows = rows.slice(rows.findLastIndex((r) => r.reset) + 1);
+    // Collapse the blank runs left between tool steps.
+    return rows.filter((r) => !r.reset).slice(-n).reverse().map((r) => ({ ...r, eve: String(r.eve).replace(/\n\s*\n(\s*\n)+/g, '\n\n') }));
   } catch {
     return [];
   }

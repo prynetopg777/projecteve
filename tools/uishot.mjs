@@ -2,7 +2,7 @@
 // Screenshots of the running Eve page at several window sizes, with a demo conversation filled in
 // (messages, tool steps, a permission card, an error) so every state can be reviewed at once.
 // Speech and the mic are never started, and permission cards are never answered.
-// Usage: node tools/uishot.mjs [name] [--sizes 1440x900,1024x768,390x844] [--settings] [--empty | --busy]
+// Usage: node tools/uishot.mjs [name] [--sizes 1440x900,1024x768,390x844] [--settings] [--empty | --busy | --live]
 // Saves data/ui-<name>-<w>x<h>.png and prints the paths; Read them to review the design.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -20,6 +20,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DEMO = `(() => {
   document.getElementById('boot')?.remove();
   voiceOn = false; updateButtons();
+  if (${args.includes('--live')}) return; // the page as it really loads (restored conversation and all)
   log.replaceChildren();
   addMsg('eve', 'Good afternoon, sir. All systems online. Say "eve" followed by your request.');
   if (${args.includes('--empty')}) return;

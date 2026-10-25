@@ -189,7 +189,10 @@ const routes = {
       json(res, 500, { error: e.message });
     }
   },
-  'GET /api/history': async (req, res) => json(res, 200, { items: readHistory(100) }),
+  'GET /api/history': async (req, res) => {
+    const q = new URL(req.url, 'http://x').searchParams;
+    json(res, 200, { items: readHistory(Math.min(500, +q.get('n') || 100), { sinceReset: q.has('current') }) });
+  },
   'POST /api/ui-state': async (req, res) => {
     const { state } = await readJson(req);
     if (['idle', 'listening', 'thinking', 'speaking'].includes(state)) uiState = state;

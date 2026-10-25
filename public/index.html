@@ -135,6 +135,9 @@
     background: var(--bg-2); box-shadow: 0 16px 40px rgba(0, 0, 0, .5);
   }
   .histpanel[hidden] { display: none; }
+  .settings .keys { margin: var(--s2) var(--s2) 0; font-size: 12px; color: var(--text-2); }
+  .log .past { opacity: .6; }
+  .log .divider { text-align: center; font-size: 12px; color: var(--text-2); border: 0; background: none; }
   .histhead { display: flex; justify-content: space-between; align-items: center; padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line); }
   .histlist { overflow-y: auto; padding: var(--s2) var(--s4); font-size: var(--fs-sm); color: var(--text-2); }
   .histitem { padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
@@ -378,6 +381,7 @@
         <div class="row">Wake word <button id="wakeBtn" aria-pressed="false" title="Listen continuously for the wake word"><span class="tick" aria-hidden="true"></span><span id="wakeLabel">Off</span></button></div>
         <hr>
         <button id="histBtn" class="wide" title="Past conversations">History</button>
+        <p class="keys">Ctrl+Space talk · Esc stop · / or Ctrl+K type · ↑ last request</p>
         <button id="newBtn" class="wide" title="Clears the transcript. Long-term memory is kept.">Start a new chat</button>
       </div>
     </div>
@@ -957,6 +961,7 @@ function onDone() {
 }
 
 // ---------- Server connection ----------
+let busySince = 0;
 const events = new EventSource('/events');
 events.onopen = () => { offline = false; render(); };
 events.onerror = () => { offline = true; render(); }; // the browser retries by itself
@@ -980,7 +985,7 @@ events.onmessage = (e) => {
     case 'permission-resolved': resolvePermission(ev.id, ev.decision); break;
     case 'refreshed': replyEl = null; addMsg('system', '🧹 Context refreshed to stay fast. Memory intact.'); break;
     case 'restarting': replyEl = null; addMsg('system', '♻ Restarting to load my updates. Back in a moment.'); break;
-    case 'busy': busy = ev.busy; armAck(busy); if (!busy) markTools('done'); render(); break;
+    case 'busy': if (ev.busy && !busy) busySince = Date.now(); busy = ev.busy; armAck(busy); if (!busy) markTools('done'); render(); break;
     case 'stats': {
       const sec = (ms) => (ms / 1000).toFixed(1) + ' s';
       addMsg('stat', [ev.model, ev.routedBy, sec(ev.ms) + (ev.ttft_ms ? ` (first word ${sec(ev.ttft_ms)})` : ''), ev.cost_usd ? '$' + ev.cost_usd.toFixed(3) : 'free', ev.tools ? `${ev.tools} tool${ev.tools > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · '));
@@ -989,7 +994,10 @@ events.onmessage = (e) => {
     case 'user': if (ev.text !== lastSent) addMsg('user', ev.text); lastSent = null; break;
     case 'delta': onDelta(ev.text); break;
     case 'tool': replyEl = null; addMsg('tool', `${ev.sub ? '↳ ' : ''}${ev.label || friendlyTool(ev.name)}`); break;
-    case 'done': markTools('done'); onDone(); break;
+    case 'done':
+      // A long job finished while you were in another window: say so on the desktop too.
+      if (document.hidden && Date.now() - busySince > 15000 && window.Notification?.permission === 'granted') new Notification('Eve is done', { body: speakable(ev.text || replyText).slice(0, 140) });
+      markTools('done'); onDone(); break;
     case 'error': replyEl = null; markTools('stopped'); addError(ev.message); chime(220); break;
     case 'reminder':
       addMsg('reminder', `⏰ ${ev.text}`); chime(660); setTimeout(() => chime(990), 180);
@@ -1105,6 +1113,7 @@ async function send(text) {
   shutUp();
   if (voiceCommand(text)) return; // handled right here, no round trip to Claude
   lastSent = lastAsked = text;
+  localStorage.setItem('eveLast', text);
   convoRearm(10 * 60000); // stays open while she works; re-armed to 30s once she finishes speaking
   addMsg('user', text);
   // A new request while Eve is still working replaces the old one instead of queueing behind it.
@@ -1358,7 +1367,7 @@ $('reactor').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.pr
 // The mic button becomes a send button while there's text to send.
 const syncComposer = () => { const has = !!$('input').value.trim(); $('sendBtn').hidden = !has; $('micBtn').hidden = has; };
 $('input').addEventListener('input', syncComposer);
-$('form').onsubmit = (e) => { e.preventDefault(); send($('input').value); $('input').value = ''; syncComposer(); };
+$('form').onsubmit = (e) => { e.preventDefault(); send($('input').value); $('input').value = ''; localStorage.removeItem('eveDraft'); syncComposer(); };
 $('hints').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) send(b.textContent); });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('histPanel').hidden) { closeHistory(); return; }
@@ -1370,7 +1379,37 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') stopAll();
   if (e.code === 'Space' && e.ctrlKey) { e.preventDefault(); talk(); }
+  // "/" or Ctrl+K: jump to the text box from anywhere.
+  if ((e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName)) || (e.key.toLowerCase() === 'k' && e.ctrlKey)) { e.preventDefault(); $('input').focus(); }
 });
+// Up arrow in an empty text box brings back the last request, to edit and resend.
+$('input').addEventListener('keydown', (e) => {
+  const last = lastAsked || localStorage.getItem('eveLast');
+  if (e.key === 'ArrowUp' && !$('input').value && last) { e.preventDefault(); $('input').value = last; syncComposer(); }
+});
+// Unsent text survives reloads and restarts.
+$('input').value = localStorage.getItem('eveDraft') || '';
+syncComposer();
+$('input').addEventListener('input', () => localStorage.setItem('eveDraft', $('input').value));
+
+// After a reload, show where we left off: the last few exchanges since "Start a new chat".
+(async () => {
+  try {
+    const { items } = await (await fetch('/api/history?current&n=6')).json();
+    if (!items.length || log.querySelector('.past')) return;
+    const els = [];
+    for (const it of items.reverse()) {
+      els.push(addMsg('user', it.user));
+      const r = addMsg('eve', ''); renderReply(r, it.eve); els.push(r);
+    }
+    els.forEach((el) => el.classList.add('past'));
+    const d = addMsg('system', 'Earlier conversation above');
+    d.classList.add('divider');
+    log.prepend(...els, d); // above anything said since the page loaded (e.g. the greeting)
+    log.scrollTop = log.scrollHeight;
+    if (!localStorage.getItem('eveLast')) localStorage.setItem('eveLast', items.at(-1).user);
+  } catch { /* server not up yet: start empty */ }
+})();
 
 $('bootBtn').onclick = async () => {
   $('boot').remove();
