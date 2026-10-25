@@ -20,6 +20,12 @@ Details that don't need to be in every conversation. Paths are relative to Eve's
 - `node tools/cache.mjs get|set|run|list|clear` is the tool-result cache in data/cache/ (separate from prompt caching).
 - `node tools/eval.mjs checks` runs offline tests (fast paths, cache, memory dedup); `eval.mjs compare <commit|date> [days]` compares cost, tokens, cache hit, latency, success and fast-path share before vs after a change. Run both after any optimisation.
 - `memory.mjs add` refuses near-duplicates (use `update` or `--force`); `search` folds similar notes into one result and lists their ids.
+- Memory search is hybrid: meaning (local `nomic-embed-text` embeddings via Ollama) plus words; `memory.mjs reindex` embeds every note. `link` checks the ontology note (tag `ontology`, "ONTOLOGY rules: Person plays Game; ...") against each name's "is a" class and refuses mismatches unless `--force`.
+- Fast paths (no model call) now also cover volume up/down/mute/set to N, media play/pause/next/previous, and "set a timer for N minutes".
+- Auto routing: keywords for clear cases, otherwise local llama3.2 rates SIMPLE/NORMAL/HARD (only when already warm; it warms itself for next time). Each reply shows a status line in the UI: model, how it was picked, time, first-word time, cost, tools.
+- Learned permissions: approving the exact same action 3 times (never declined) stops the prompt for it; stored in data/learned-permissions.json (delete a key to forget). Never applies to the always-ask list or after web reads.
+- Health page: http://localhost:7777/health (JSON at /api/health) shows every part green/amber/red, including the offline tests.
+- The UI has a listening-language picker (Filipino/Taglish, English PH, English US), saved per browser.
 - `node tools/local.mjs [--model name] [--max n] [--ctx 4096] [--json] "prompt"` (models are Q4_K_M; one job at a time; servers it starts use flash attention and an 8-bit KV cache) runs a local Ollama model (starts the server if needed); `local.mjs models` lists them.
 - `node tools/screenshot.mjs` saves the primary screen to data/screen.png and prints the path; then Read that image. Only when the user asks about their screen.
 

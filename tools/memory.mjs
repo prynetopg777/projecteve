@@ -86,16 +86,58 @@ function similarity(a, b) {
   return both / (x.size + y.size - both);
 }
 const ftsAny = (s) => [...words(s)].map((w) => `"${w.replace(/"/g, '')}"*`).join(' OR ');
-function drop(r) { db.prepare("INSERT INTO mem_fts (mem_fts, rowid, text, tag) VALUES ('delete', ?, ?, ?)").run(r.id, r.text, r.tag); }
+function drop(r) { db.prepare("INSERT INTO mem_fts (mem_fts, rowid, text, tag) VALUES ('delete', ?, ?, ?)").run(r.id, r.text, r.tag); db.prepare('DELETE FROM mem_vec WHERE id = ?').run(r.id); }
+
+// Meaning-based memory: embeddings from the local Ollama model (free, private). If Ollama or the model isn't
+// available, everything falls back to the word-overlap checks above.
+const EMBED_MODEL = 'nomic-embed-text';
+db.exec('CREATE TABLE IF NOT EXISTS mem_vec (id INTEGER PRIMARY KEY, vec TEXT)');
+async function embed(text, kind = 'search_document') { // nomic models expect a task prefix
+  try {
+    const r = await fetch('http://127.0.0.1:11434/api/embed', { method: 'POST', body: JSON.stringify({ model: EMBED_MODEL, input: `${kind}: ${text}` }), signal: AbortSignal.timeout(5000) });
+    return r.ok ? (await r.json()).embeddings?.[0] || null : null;
+  } catch {
+    return null;
+  }
+}
+function cosine(a, b) {
+  let dot = 0, x = 0, y = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; x += a[i] * a[i]; y += b[i] * b[i]; }
+  return x && y ? dot / Math.sqrt(x * y) : 0;
+}
+const saveVec = (id, v) => v && db.prepare('INSERT OR REPLACE INTO mem_vec (id, vec) VALUES (?, ?)').run(id, JSON.stringify(v));
+// Live notes ranked by meaning, best first: [{ ...row, score, vec }].
+const byMeaning = (v) => db.prepare(`SELECT m.*, v.vec FROM mem m JOIN mem_vec v ON v.id = m.id WHERE ${live}`).all(now)
+  .map((r) => ({ ...r, vec: JSON.parse(r.vec) })).map((r) => ({ ...r, score: cosine(v, r.vec) })).sort((a, b) => b.score - a.score);
+const vecOf = (id) => { const r = db.prepare('SELECT vec FROM mem_vec WHERE id = ?').get(id); return r ? JSON.parse(r.vec) : null; };
+// Same fact? Meaning when both notes have embeddings, word overlap otherwise.
+const alike = (a, b, vecLimit, wordLimit) => (a.vec && b.vec ? cosine(a.vec, b.vec) >= vecLimit : similarity(a.text, b.text) >= wordLimit);
+
+// The ontology (memory notes tagged "ontology") as rules: "Person dislikes Person; Person plays Game; ...".
+function ontologyRules() {
+  const note = db.prepare("SELECT text FROM mem WHERE tag = 'ontology' AND text LIKE 'ONTOLOGY rules:%'").get();
+  if (!note) return [];
+  return note.text.replace(/^ONTOLOGY rules:/, '').split(';').map((s) => /^\s*([A-Z]\w*) (.+?) ([A-Z]\w*)\s*\.?\s*$/.exec(s.split('.')[0]))
+    .filter(Boolean).map(([, from, rel, to]) => ({ from, rel: rel.toLowerCase(), to }));
+}
+const classOf = (name) => db.prepare("SELECT b FROM edge WHERE a = ? AND rel IN ('is a', 'is an')").get(name)?.b || '';
 
 if (cmd === 'add' && arg) {
   const q = ftsAny(arg);
-  const near = q && db.prepare(`SELECT m.* FROM mem_fts f JOIN mem m ON m.id = f.rowid WHERE mem_fts MATCH ? AND ${live} ORDER BY bm25(mem_fts) LIMIT 5`).all(q, now)
-    .find((r) => similarity(r.text, arg) >= 0.85);
+  const v = await embed(arg);
+  const near = (v && byMeaning(v).find((r) => r.score >= 0.92))
+    || (q && db.prepare(`SELECT m.* FROM mem_fts f JOIN mem m ON m.id = f.rowid WHERE mem_fts MATCH ? AND ${live} ORDER BY bm25(mem_fts) LIMIT 5`).all(q, now)
+      .find((r) => similarity(r.text, arg) >= 0.85));
   if (near && !force) { console.log(`Already remembered as #${near.id}: ${near.text}\n(use "update ${near.id} ..." to change it, or add --force to keep both)`); process.exit(0); }
   const { lastInsertRowid: id } = db.prepare('INSERT INTO mem (ts, tag, text, source, expires) VALUES (?, ?, ?, ?, ?)').run(now, tag, arg, source, expires);
   db.prepare('INSERT INTO mem_fts (rowid, text, tag) VALUES (?, ?, ?)').run(id, arg, tag);
+  saveVec(id, v);
   console.log(`Remembered #${id}.`);
+} else if (cmd === 'reindex') {
+  // Give every note an embedding (after installing the embedding model, or to refresh them all).
+  let done = 0;
+  for (const r of db.prepare('SELECT id, text FROM mem').all()) { const v = await embed(r.text); if (!v) break; saveVec(r.id, v); done++; }
+  console.log(done ? `Embedded ${done} notes.` : `Couldn't reach the embedding model (ollama pull ${EMBED_MODEL}); search uses words only.`);
 } else if (cmd === 'update' && /^\d+$/.test(quoted[0] || '')) {
   // Correct a memory in place: new text and/or --tag/--source/--expires.
   const r = db.prepare('SELECT * FROM mem WHERE id = ?').get(Number(quoted[0]));
@@ -104,14 +146,24 @@ if (cmd === 'add' && arg) {
   drop(r);
   db.prepare('UPDATE mem SET ts = ?, tag = ?, text = ?, source = ?, expires = ? WHERE id = ?').run(now, t, text, source || r.source || '', expires || r.expires || '', r.id);
   db.prepare('INSERT INTO mem_fts (rowid, text, tag) VALUES (?, ?, ?)').run(r.id, text, t);
+  saveVec(r.id, await embed(text));
   console.log(`Updated #${r.id}.`);
 } else if (cmd === 'search' && arg) {
   const q = arg.split(/\s+/).map((w) => `"${w.replace(/"/g, '')}"*`).join(' OR ');
-  const found = db.prepare(`SELECT m.* FROM mem_fts f JOIN mem m ON m.id = f.rowid WHERE mem_fts MATCH ? AND ${live} ORDER BY bm25(mem_fts) LIMIT 25`).all(q, now);
+  const byWords = db.prepare(`SELECT m.* FROM mem_fts f JOIN mem m ON m.id = f.rowid WHERE mem_fts MATCH ? AND ${live} ORDER BY bm25(mem_fts) LIMIT 25`).all(q, now);
+  // Hybrid: notes that match by meaning (even with different words) and by words; notes matching both rank first.
+  const v = await embed(arg, 'search_query');
+  const meaning = v ? byMeaning(v).filter((r) => r.score >= 0.55).slice(0, 25) : [];
+  const wordIds = new Set(byWords.map((r) => r.id)), meaningIds = new Set(meaning.map((r) => r.id));
+  const found = [
+    ...meaning.filter((r) => wordIds.has(r.id)),
+    ...meaning.filter((r) => !wordIds.has(r.id)),
+    ...byWords.filter((r) => !meaningIds.has(r.id)).map((r) => ({ ...r, vec: vecOf(r.id) })),
+  ];
   // Fold near-duplicates into the best-ranked match; the folded ids stay visible so no evidence is lost.
   const rows = [];
   for (const r of found) {
-    const twin = rows.find((k) => similarity(k.text, r.text) >= 0.7);
+    const twin = rows.find((k) => alike(k, r, 0.9, 0.7));
     if (twin) (twin.similar ||= []).push(r.id); else if (rows.length < 10) rows.push(r);
   }
   rows.length ? rows.forEach((r) => { show(r); if (r.similar) console.log(`   (+ similar: ${r.similar.map((i) => '#' + i).join(', ')})`); }) : console.log('Nothing found.');
@@ -130,8 +182,19 @@ if (cmd === 'add' && arg) {
   db.prepare('DELETE FROM mem WHERE id = ?').run(r.id);
   console.log(`Removed #${r.id}.`);
 } else if (cmd === 'link' && quoted.length === 3) {
-  db.prepare('INSERT INTO edge (a, rel, b) VALUES (?, ?, ?)').run(...quoted);
-  console.log(`Linked: ${quoted[0]} -[${quoted[1]}]-> ${quoted[2]}`);
+  // Ontology check: a known relation must connect the classes its rule names ("Person plays Game").
+  const [a, rel, b] = quoted;
+  const rules = ontologyRules().filter((r) => r.rel === rel.toLowerCase());
+  const ca = classOf(a), cb = classOf(b);
+  if (rules.length && ca && cb && !rules.some((r) => r.from === ca && r.to === cb) && !force) {
+    console.log(`That breaks the ontology: "${rel}" links ${rules.map((r) => `${r.from} -> ${r.to}`).join(' or ')}, but ${a} is a ${ca} and ${b} is a ${cb}.\n(fix the link, or add --force to store it anyway)`);
+    process.exit(0);
+  }
+  db.prepare('INSERT INTO edge (a, rel, b) VALUES (?, ?, ?)').run(a, rel, b);
+  console.log(`Linked: ${a} -[${rel}]-> ${b}`);
+  const unknown = [!ca && !/^is an?$/i.test(rel) && a, !cb && !/^is an?$/i.test(rel) && b].filter(Boolean);
+  if (rules.length && unknown.length) console.log(`Note: ${unknown.join(' and ')} ${unknown.length > 1 ? 'have' : 'has'} no class yet; add one with link "<name>" "is a" "<Class>".`);
+  else if (!rules.length && ontologyRules().length && !/^is an?$/i.test(rel)) console.log(`Note: "${rel}" isn't in the ontology rules yet.`);
 } else if (cmd === 'unlink' && quoted.length === 3) {
   const { changes } = db.prepare('DELETE FROM edge WHERE a = ? AND rel = ? AND b = ?').run(...quoted);
   console.log(changes ? `Unlinked: ${quoted[0]} -[${quoted[1]}]-> ${quoted[2]}` : 'No such link.');
@@ -150,5 +213,5 @@ if (cmd === 'add' && arg) {
   if (rest[0] !== '--no-open') spawn('cmd', ['/c', 'start', '', file], { detached: true, stdio: 'ignore' }).unref();
 } else {
   console.log('Usage: add "text" [--tag x] [--source where] [--expires 30d|date] | update <id> ["new text"] [--tag/--source/--expires]\n'
-    + '  | search "words" | list [n] | expired [--purge] | remove <id> | link "a" "relation" "b" | unlink "a" "relation" "b" | graph "name" | view');
+    + '  | search "words" | reindex | list [n] | expired [--purge] | remove <id> | link "a" "relation" "b" | unlink "a" "relation" "b" | graph "name" | view');
 }

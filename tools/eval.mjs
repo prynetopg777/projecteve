@@ -65,6 +65,9 @@ if (cmd === 'compare' && point) {
     ['remind me in 10 minutes to stretch', 'remind'], ['open notepad', 'open'],
     ['what time is it in Tokyo', null], ['open the file I edited yesterday', null], ['remind me tomorrow to call mom', null],
     ['how good is kindred against akali', null], ['open nonexistent app xyz', null],
+    ['volume up', 'volume'], ['Eve, turn the volume down a little', 'volume'], ['mute', 'volume'], ['set the volume to 40', 'volume-set'],
+    ['pause', 'media'], ['next song', 'media'], ['set a timer for 10 minutes', 'timer'], ['start a 5 minute timer', 'timer'],
+    ['play despacito on spotify', null], ['set the volume to 400', null], ['start 5 minutes', null], ['why is my volume so low', null],
   ];
   let pass = 0;
   for (const [text, want] of cases) {

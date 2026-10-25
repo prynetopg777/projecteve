@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { DATA_DIR, ROOT, WORKSPACE } from './config.mjs';
-import { describe, grantKey, isAutoAllowed, isTaskDone } from './permissions.mjs';
+import { alwaysAsk, describe, grantKey, isAutoAllowed, isTaskDone, taskRequest } from './permissions.mjs';
 import { fastPath } from './fastpath.mjs';
 
 const SESSION_FILE = path.join(DATA_DIR, 'session.json');
@@ -18,6 +18,12 @@ const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json'); // { autoMode }
 const MODEL_FILE = path.join(DATA_DIR, 'model.json'); // written by tools/eve.mjs when Eve switches models
 const HINT_FILE = path.join(DATA_DIR, 'model-hint.json'); // Eve's own one-shot model pick while on Auto
 const BRIEFING_FILE = path.join(DATA_DIR, 'briefing.json'); // { date } of the last morning offer
+const LEARNED_FILE = path.join(DATA_DIR, 'learned-permissions.json'); // { grantKey: times approved } (-1 = declined once: never learn)
+const LEARN_AFTER = 3; // approve the exact same action this many times and Eve stops asking for it
+const OLLAMA = 'http://127.0.0.1:11434';
+const ROUTER_PROMPT = 'Rate how hard this request is for an AI assistant. SIMPLE = chit-chat, a quick fact, or one simple PC action. '
+  + 'NORMAL = everyday tasks, web lookups, a few steps. HARD = writing or fixing code, deep research, careful planning, long analysis. '
+  + 'Answer with one word: SIMPLE, NORMAL or HARD.\n\nRequest: ';
 export const MODELS = ['haiku', 'sonnet', 'opus'];
 const PERMISSION_TIMEOUT_MS = 3 * 60 * 1000;
 const USAGE_FILE = path.join(DATA_DIR, 'usage.jsonl'); // one line per turn; summarised by tools/usage.mjs
@@ -132,14 +138,50 @@ export class Brain extends EventEmitter {
     return MODELS.includes(m) ? m : null;
   }
 
-  /** Auto mode: choose the lightest model that suits this message. */
+  /** Auto mode: clear-cut messages are routed by keywords; returns null when it's a judgement call. */
   #pickModel(text) {
     const t = text.toLowerCase();
-    const heavy = /\b(code|script|program|build|implement|refactor|debug|fix|bug|improve yourself|upgrade yourself|edit|rewrite|write (a|an|me)|plan|research|analy[sz]e|compare|explain why|essay|architecture|optimi[sz]e|install|deep|detailed|step by step)\b/;
+    const heavy = /\b(code|script|program|implement|refactor|debug|improve yourself|upgrade yourself|rewrite|research|analy[sz]e|essay|architecture|optimi[sz]e|step by step)\b/;
     const simple = /\b(hi|hello|hey|thanks|thank you|okay|ok|yes|no|open|play|pause|volume|mute|time|date|weather|remind|timer|alarm|joke|how are you|what'?s up|good (morning|night))\b/;
     if (this.taskActive || text.length > 350 || heavy.test(t)) return 'opus';
     if (text.length <= 90 && simple.test(t)) return 'haiku';
-    return 'sonnet';
+    return null;
+  }
+
+  /**
+   * Judgement calls go to a small local model (free, ~0.2 s when warm). If it isn't loaded yet it is warmed up
+   * in the background for next time and this message gets sonnet, so routing never makes a reply slow.
+   */
+  async #classify(text) {
+    if (this.cfg.localRouter === false) return null;
+    const model = this.cfg.routerModel || 'llama3.2';
+    try {
+      const ps = await (await fetch(`${OLLAMA}/api/ps`, { signal: AbortSignal.timeout(300) })).json();
+      if (!ps.models?.some((m) => m.name.startsWith(model))) {
+        fetch(`${OLLAMA}/api/generate`, { method: 'POST', body: JSON.stringify({ model, keep_alive: '30m' }) }).catch(() => {});
+        return null;
+      }
+      const body = { model, prompt: ROUTER_PROMPT + text.slice(0, 500), stream: false, keep_alive: '30m', options: { temperature: 0, num_predict: 4 } };
+      const r = await fetch(`${OLLAMA}/api/generate`, { method: 'POST', body: JSON.stringify(body), signal: AbortSignal.timeout(1500) });
+      const word = String((await r.json()).response || '').toUpperCase();
+      return word.includes('HARD') ? 'opus' : word.includes('SIMPLE') ? 'haiku' : word.includes('NORMAL') ? 'sonnet' : null;
+    } catch {
+      return null; // Ollama not running or too slow: the default is fine
+    }
+  }
+
+  /** Approved the exact same action LEARN_AFTER times (and never declined it)? Then stop asking. */
+  #learned(tool, input) {
+    if (this.cfg.learnPermissions === false || alwaysAsk(tool, input) || taskRequest(tool, input)) return false;
+    return (readJson(LEARNED_FILE)[grantKey(tool, input)] || 0) >= LEARN_AFTER;
+  }
+
+  #learn(key, allowed) {
+    if (this.cfg.learnPermissions === false || !key) return;
+    const all = readJson(LEARNED_FILE);
+    if (all[key] === -1) return;
+    all[key] = allowed ? (all[key] || 0) + 1 : -1;
+    writeJson(LEARNED_FILE, all);
   }
 
   start() {
@@ -197,7 +239,7 @@ export class Brain extends EventEmitter {
   /** Send one user message; resolves with Eve's full reply text. Turns run one at a time. */
   ask(text) {
     const run = () =>
-      new Promise((resolve, reject) => {
+      new Promise(async (resolve, reject) => {
         // Eve switched models during the last turn: restart the process on the new model, same conversation.
         const fast = fastPath(text, this.cfg);
         if (fast) return this.#fastReply(text, fast, resolve);
@@ -205,21 +247,31 @@ export class Brain extends EventEmitter {
         const capped = !!this.budget.dailyHardUsd && spentToday() >= this.budget.dailyHardUsd;
         if (capped && !this.capped) this.note(`Hard spending cap: today passed $${this.budget.dailyHardUsd}, so you're on haiku until midnight. Tell the user once, briefly; they can raise budget.dailyHardUsd in config.json.`);
         this.capped = capped;
-        let escalated = false;
+        let escalated = false, routedBy = 'fixed';
+        const started = Date.now();
         if (readJson(MODEL_FILE).model === 'auto') {
-          const pick = this.#takeHint() || this.#pickModel(text);
+          const hint = this.#takeHint(), keyword = hint ? null : this.#pickModel(text);
+          const local = hint || keyword ? null : await this.#classify(text);
+          const pick = hint || keyword || local || 'sonnet';
+          routedBy = hint ? 'own pick' : keyword ? 'keywords' : local ? 'local model' : 'default';
           escalated = !!this.escalate && MODELS.indexOf(this.escalate) > MODELS.indexOf(pick);
+          if (escalated) routedBy = 'escalated';
           this.autoPick = escalated ? this.escalate : pick;
           this.escalate = null;
         }
-        if (this.proc && this.runningModel !== this.model) this.#kill();
-        if (!this.proc) this.start();
-        this.turn = { resolve, reject, text: '', messages: 0, userText: text, started: Date.now(), firstToken: 0, tools: 0, sigs: new Map(), escalated };
-        this.emit('busy', true);
-        this.#briefingNote();
-        const notes = this.notes.splice(0).map((n) => `[System note: ${n}]\n`).join('');
-        const content = `[${timestamp()} · model: ${this.runningModel} · auto mode: ${this.autoMode ? 'on' : 'off'}]\n${notes}${text}`;
-        this.#send({ type: 'user', message: { role: 'user', content } });
+        if (this.capped) routedBy = 'spending cap';
+        try { // the executor is async (local routing), so errors must be passed on by hand
+          if (this.proc && this.runningModel !== this.model) this.#kill();
+          if (!this.proc) this.start();
+          this.turn = { resolve, reject, text: '', messages: 0, userText: text, started, firstToken: 0, tools: 0, sigs: new Map(), escalated, routedBy };
+          this.emit('busy', true);
+          this.#briefingNote();
+          const notes = this.notes.splice(0).map((n) => `[System note: ${n}]\n`).join('');
+          const content = `[${timestamp()} · model: ${this.runningModel} · auto mode: ${this.autoMode ? 'on' : 'off'}]\n${notes}${text}`;
+          this.#send({ type: 'user', message: { role: 'user', content } });
+        } catch (err) {
+          reject(err);
+        }
       });
     const p = this.queue.then(run, run);
     this.queue = p.catch(() => {});
@@ -253,6 +305,7 @@ export class Brain extends EventEmitter {
     const allow = decision === 'allow' || decision === 'always';
     if (allow && p.req.kind === 'task') this.#startTask(p.req.detail);
     else if (decision === 'always') this.grants.add(p.req.key);
+    if (p.req.id && p.req.kind !== 'task' && !message) this.#learn(p.req.key, allow); // the user's own answer, not a timeout
     this.#send({
       type: 'control_response',
       response: {
@@ -386,6 +439,7 @@ export class Brain extends EventEmitter {
         status: turn.interrupted ? 'interrupted' : failed ? 'error' : 'ok',
       });
       this.#checkBudget(entry);
+      this.emit('stats', { model: this.runningModel, routedBy: turn.routedBy, ms: Date.now() - turn.started, ttft_ms: turn.firstToken ? turn.firstToken - turn.started : 0, cost_usd: msg.total_cost_usd || 0, tools: turn.tools });
       // Compaction: before the context gets refreshed, have Eve write down what must survive it.
       if (this.cfg.autoRefresh !== false && !this.compactNoted && tokens >= 0.75 * (this.cfg.refreshTokens || 60000)) {
         this.compactNoted = true;
@@ -423,7 +477,8 @@ export class Brain extends EventEmitter {
     if (this.turn && WEB_TOOLS.has(tool)) this.turn.webTainted = true;
     // After reading the web this turn, auto mode / the task approval no longer cover shell or file actions.
     const webTainted = !!this.turn?.webTainted;
-    if (isAutoAllowed(tool, input, { grants: this.grants, taskActive: this.autoMode || this.taskActive, taskPlan: this.task?.plan, webTainted })) {
+    const learned = !webTainted && this.#learned(tool, input);
+    if (learned || isAutoAllowed(tool, input, { grants: this.grants, taskActive: this.autoMode || this.taskActive, taskPlan: this.task?.plan, webTainted })) {
       this.pending.set(id, { req: {}, input });
       return this.respond(id, 'allow');
     }
@@ -478,6 +533,7 @@ export class Brain extends EventEmitter {
     saveRecent(text, fast.reply);
     this.note(`Handled without you (fast path "${fast.name}"): the user said "${text}" and was told "${fast.reply}".`);
     logUsage('fast', {}, { cost_usd: 0, ms: Date.now() - t0, status: 'ok', fast: fast.name });
+    this.emit('stats', { model: 'instant', routedBy: `fast path: ${fast.name}`, ms: Date.now() - t0, ttft_ms: 0, cost_usd: 0, tools: 0 });
     this.emit('done', fast.reply);
     this.emit('busy', false);
     resolve(fast.reply);
@@ -532,7 +588,7 @@ function logUsage(model, u = {}, extra = {}) {
 }
 
 // Dollars spent since local midnight, from the usage log.
-function spentToday() {
+export function spentToday() {
   try {
     const today = new Date().toDateString();
     return fs.readFileSync(USAGE_FILE, 'utf8').split('\n').reduce((sum, l) => {

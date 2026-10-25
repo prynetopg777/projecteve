@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { Brain } from './brain.mjs';
+import { Brain, spentToday } from './brain.mjs';
+import { checkHealth, healthPage } from './health.mjs';
 import { loadConfig, ROOT } from './config.mjs';
 import { startReminderLoop } from './reminders.mjs';
 import * as su from './selfupdate.mjs';
@@ -29,7 +30,9 @@ const broadcast = (event) => {
 brain.on('delta', (text) => broadcast({ type: 'delta', text }));
 brain.on('tool', ({ name, input, sub }) => broadcast({ type: 'tool', name, sub, detail: describeTool(input) }));
 brain.on('done', (text) => broadcast({ type: 'done', text }));
-brain.on('error', (err) => broadcast({ type: 'error', message: err.message }));
+let lastError = null; // shown on the health page until the next good reply
+brain.on('error', (err) => { lastError = err.message.slice(0, 200); broadcast({ type: 'error', message: err.message }); });
+brain.on('stats', (s) => { lastError = null; broadcast({ type: 'stats', ...s }); });
 brain.on('model', (model) => broadcast({ type: 'model', model, pref: brain.modelPref }));
 brain.on('task', (task, reason) => broadcast({ type: 'task', task, reason }));
 brain.on('auto', (on) => { console.log(on ? '⚡ Auto mode ON: Eve acts without asking' : '🔐 Auto mode off'); broadcast({ type: 'auto', on }); });
@@ -211,6 +214,12 @@ const routes = {
     json(res, 200, { ok: true });
   },
   'GET /api/status': (req, res) => json(res, 200, status()),
+  'GET /api/health': async (req, res) => json(res, 200, await checkHealth({ brain, cfg, clients: clients.size, lastError, spentToday })),
+  'GET /health': async (req, res) => {
+    const html = healthPage(await checkHealth({ brain, cfg, clients: clients.size, lastError, spentToday }));
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(html);
+  },
 };
 
 const server = http.createServer(async (req, res) => {

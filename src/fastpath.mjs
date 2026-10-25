@@ -41,7 +41,63 @@ const BUILTIN = {
   explorer: 'explorer.exe', 'task manager': 'taskmgr.exe', settings: 'ms-settings:', 'snipping tool': 'snippingtool.exe',
 };
 
+// Press a media/volume key n times (virtual-key codes: 173 mute, 174 vol down, 175 vol up, 176 next, 177 prev, 179 play/pause).
+function pressKeys(...steps) {
+  const script = steps.map(([code, n = 1]) => `1..${n} | % { $w.SendKeys([char]${code}) }`).join('; ');
+  spawn('powershell', ['-NoProfile', '-NonInteractive', '-Command', `$w = New-Object -ComObject WScript.Shell; ${script}`], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+}
+const MEDIA = { play: 179, resume: 179, pause: 179, 'play pause': 179, next: 176, skip: 176, previous: 177 };
+const UNIT_MS = { second: 1000, minute: 60000, hour: 3600000 };
+
 const MATCHERS = [
+  {
+    // "volume up", "turn the volume down a lot", "louder", "mute", "unmute"
+    name: 'volume',
+    re: /^(?:turn (?:the )?volume (up|down)|volume (up|down)|(louder|quieter|softer)|(mute|unmute)(?: (?:the )?(?:sound|volume|audio|pc|computer))?)(?: (a lot|a little|a bit))?$/,
+    run: (m, cfg, dry) => {
+      if (dry) return 'ok';
+      if (m[4]) { pressKeys([173]); return `${m[4] === 'mute' ? 'Muted' : 'Unmuted'}, ${cfg.honorific}.`; }
+      const up = (m[1] || m[2] || (m[3] === 'louder' ? 'up' : 'down')) === 'up';
+      const steps = m[5] === 'a lot' ? 10 : m[5] ? 2 : 5; // each press is 2%
+      pressKeys([up ? 175 : 174, steps]);
+      return `Volume ${up ? 'up' : 'down'}, ${cfg.honorific}.`;
+    },
+  },
+  {
+    // "set the volume to 40" / "volume 40 percent"
+    name: 'volume-set',
+    re: /^(?:set (?:the )?volume (?:to )?|volume (?:to )?)(\d{1,3})(?: ?(?:%|percent))?$/,
+    run: (m, cfg, dry) => {
+      const n = Number(m[1]);
+      if (n > 100) return null;
+      if (dry) return 'ok';
+      pressKeys([174, 50], [175, Math.round(n / 2)]); // to zero, then up in 2% steps
+      return `Volume set to ${n} percent, ${cfg.honorific}.`;
+    },
+  },
+  {
+    // "pause", "next song", "skip track", "previous", "play music"
+    name: 'media',
+    re: /^(play|resume|pause|play pause|next|skip|previous)(?: (?:the )?(?:song|track|music|video|media))?$/,
+    run: (m, cfg, dry) => {
+      if (dry) return 'ok';
+      pressKeys([MEDIA[m[1]]]);
+      const said = { next: 'Skipping ahead', skip: 'Skipping ahead', previous: 'Going back' }[m[1]] || 'Done';
+      return `${said}, ${cfg.honorific}.`;
+    },
+  },
+  {
+    // "set a timer for 10 minutes", "timer 5 minutes", "start a 20 second timer"
+    name: 'timer',
+    re: /^(?:set (?:a |the )?timer (?:for )?|timer (?:for )?|start (?:a |an )?)(\d+) (second|minute|hour)s?(?: timer)?$/,
+    run: (m, cfg, dry) => {
+      if (!/timer/.test(m[0])) return null; // "start 5 minutes" alone is too vague
+      if (dry) return 'ok';
+      const label = `${m[1]} ${m[2]}${m[1] === '1' ? '' : 's'}`;
+      reminders.add(`Your ${m[1]} ${m[2]} timer is up`, new Date(Date.now() + Number(m[1]) * UNIT_MS[m[2]]));
+      return `Timer set for ${label}, ${cfg.honorific}.`;
+    },
+  },
   {
     name: 'time',
     re: /^(what('?s| is) the time|what time is it|time check|anong oras na)$/,
