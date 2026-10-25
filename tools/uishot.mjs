@@ -2,7 +2,7 @@
 // Screenshots of the running Eve page at several window sizes, with a demo conversation filled in
 // (messages, tool steps, a permission card, an error) so every state can be reviewed at once.
 // Speech and the mic are never started, and permission cards are never answered.
-// Usage: node tools/uishot.mjs [name] [--sizes 1440x900,1024x768,390x844] [--settings]
+// Usage: node tools/uishot.mjs [name] [--sizes 1440x900,1024x768,390x844] [--settings] [--empty | --busy]
 // Saves data/ui-<name>-<w>x<h>.png and prints the paths; Read them to review the design.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -22,6 +22,8 @@ const DEMO = `(() => {
   voiceOn = false; updateButtons();
   log.replaceChildren();
   addMsg('eve', 'Good afternoon, sir. All systems online. Say "eve" followed by your request.');
+  if (${args.includes('--empty')}) return;
+  if (${args.includes('--busy')}) { addMsg('user', 'what is on my to-do list?'); addMsg('tool', 'Reading my notes…'); busy = true; render(); return; }
   addMsg('user', 'how good is Kindred against Akali?');
   addMsg('tool', 'Searching the web…');
   addMsg('tool', 'Reading a web page…');
@@ -30,7 +32,7 @@ const DEMO = `(() => {
   addMsg('stat', 'sonnet · auto · 6.2 s (first word 2.1 s) · $0.018 · 2 tools');
   addMsg('system', '⚡ Auto mode on. Eve will act without asking (shutdowns, disk wipes and similar still ask).');
   addMsg('reminder', '⏰ Stand up and stretch');
-  addMsg('error', 'Request failed (500)');
+  lastAsked = 'how good is Kindred against Akali?'; addError("That request didn't go through (error 500).");
   showPermission({ id: 'demo-perm', title: 'delete the folder Downloads/old-builds', detail: 'Remove-Item -Recurse "C:/Users/Admin/Downloads/old-builds"', kind: 'action' });
   ${args.includes('--settings') ? "document.getElementById('settingsBtn')?.click();" : ''}
 })()`;
@@ -72,8 +74,9 @@ try {
     const r = await send('Runtime.evaluate', { expression: DEMO, returnByValue: true });
     if (r.result?.exceptionDetails) errors.push(r.result.exceptionDetails.exception?.description || 'demo script failed');
     await sleep(900);
-    const over = await send('Runtime.evaluate', { returnByValue: true, expression: 'document.documentElement.scrollWidth > innerWidth + 1 ? document.documentElement.scrollWidth : 0' });
-    if (over.result?.result?.value) errors.push(`${w}x${h}: horizontal overflow (${over.result.result.value}px wide)`);
+    // body hides overflow, so check the boxes themselves: anything poking past the right edge is clipped.
+    const over = await send('Runtime.evaluate', { returnByValue: true, expression: `[...document.querySelectorAll('header, main, .panel, .log > *, form, .controls')].filter((el) => el.offsetParent && el.getBoundingClientRect().right > innerWidth + 1).map((el) => (el.id || el.className || el.tagName) + ' ' + Math.round(el.getBoundingClientRect().right) + 'px').join(', ')` });
+    if (over.result?.result?.value) errors.push(`${w}x${h}: clipped past the right edge: ${over.result.result.value}`);
     const shot = await send('Page.captureScreenshot', { format: 'png' });
     const file = path.join(DATA_DIR, `ui-${name}-${w}x${h}.png`);
     fs.writeFileSync(file, Buffer.from(shot.result.data, 'base64'));

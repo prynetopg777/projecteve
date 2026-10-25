@@ -5,329 +5,398 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E.V.E.</title>
 <style>
+  /* ---------- Design tokens ----------
+     Direction: a quiet instrument. Calm, flat surfaces with hairline borders, and one accent colour that
+     always means "what Eve is doing right now" (cyan idle, teal listening, amber thinking or waiting for you,
+     violet speaking). The orb is the only expressive element; everything else stays out of the way. */
   :root {
-    --bg: #02050b;
-    --bg2: #061224;
-    --glass: rgba(12, 28, 48, .52);
-    --glass-hi: rgba(20, 44, 72, .55);
-    --line: rgba(90, 220, 255, .16);
-    --line-hi: rgba(90, 230, 255, .42);
-    --cyan: #38e8ff;
-    --teal: #2dffc4;
-    --cyan-dim: #2a8fb3;
-    --text: #d9f1fb;
-    --muted: #6f93a8;
-    --amber: #ffb547;
-    --violet: #b98cff;
-    --red: #ff5a6a;
-    --green: #7dffc0;
-    --accent: var(--cyan);
-    --radius: 18px;
     color-scheme: dark;
+    /* Surfaces, darkest to most raised */
+    --bg-0: #060a12;
+    --bg-1: #0b121d;
+    --bg-2: #101a28;
+    --bg-3: #172334;
+    --line: rgba(160, 196, 224, .10);
+    --line-2: rgba(160, 196, 224, .18);
+    --line-3: rgba(160, 196, 224, .30);
+    /* Text: primary, secondary, tertiary (all at least 4.5:1 on --bg-1) */
+    --text: #e7eef5;
+    --text-2: #a9b9c9;
+    --text-3: #7f93a7;
+    /* State and semantic colours */
+    --c-idle: #62d6f0;
+    --c-listen: #3fe3b4;
+    --c-think: #f3b552;
+    --c-speak: #ad92ff;
+    --c-ok: #63dc9f;
+    --c-warn: #f3b552;
+    --c-danger: #ff7272;
+    --c-off: #6c7f92;
+    --accent: var(--c-idle);
+    /* Type */
+    --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+    --fs-xs: .75rem;
+    --fs-sm: .8125rem;
+    --fs-md: 1rem;
+    --fs-lg: 1.125rem;
+    /* Space (4 px grid) and shape */
+    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+    --r-sm: 8px; --r-md: 12px; --r-lg: 18px; --r-pill: 999px;
+    /* Motion */
+    --ease: cubic-bezier(.2, .8, .2, 1);
+    --t-fast: 120ms;
+    --t-med: 240ms;
   }
-  body[data-state="listening"] { --accent: var(--teal); }
-  body[data-state="thinking"] { --accent: var(--amber); }
-  body[data-state="speaking"] { --accent: var(--violet); }
-  body[data-state="permission"] { --accent: var(--amber); }
-  body[data-state="offline"] { --accent: var(--muted); }
+  body[data-state="listening"] { --accent: var(--c-listen); }
+  body[data-state="thinking"] { --accent: var(--c-think); }
+  body[data-state="speaking"] { --accent: var(--c-speak); }
+  body[data-state="permission"] { --accent: var(--c-warn); }
+  body[data-state="offline"] { --accent: var(--c-off); }
 
   * { box-sizing: border-box; }
+  html { font-size: clamp(14px, .4vw + 9px, 18px); }
   html, body { height: 100%; margin: 0; }
   body {
-    background:
-      radial-gradient(ellipse 80% 55% at 50% -10%, #0c2a48 0%, transparent 70%),
-      radial-gradient(ellipse 60% 40% at 50% 110%, #062033 0%, transparent 70%),
-      linear-gradient(180deg, var(--bg2), var(--bg)) fixed;
+    background: radial-gradient(ellipse 70% 50% at 30% 0%, #0c1a2b 0%, transparent 70%), var(--bg-0);
     color: var(--text);
-    font: clamp(13.5px, 0.55vw + 9.5px, 19px)/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    font: var(--fs-md)/1.55 var(--font);
+    font-feature-settings: "tnum" 0;
     display: grid;
-    grid-template-rows: auto 1fr auto;
-    max-width: 960px;
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 760px;
     margin: 0 auto;
-    padding: 0 14px;
+    padding: 0 var(--s3);
     overflow: hidden;
   }
-  /* Faint HUD grid + scanlines behind everything */
-  body::before, body::after { content: ""; position: fixed; inset: 0; pointer-events: none; z-index: -1; }
-  body::before {
-    background-image: linear-gradient(rgba(80, 210, 255, .045) 1px, transparent 1px), linear-gradient(90deg, rgba(80, 210, 255, .045) 1px, transparent 1px);
-    background-size: 44px 44px;
-    mask-image: radial-gradient(ellipse at 50% 30%, #000 0%, transparent 75%);
-    animation: drift 40s linear infinite;
-  }
-  body::after { background: repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0 1px, transparent 1px 3px); }
-  @keyframes drift { to { background-position: 44px 44px, 44px 44px; } }
-
-  ::selection { background: rgba(56, 232, 255, .3); }
+  ::selection { background: rgba(98, 214, 240, .28); }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-thumb { background: rgba(90, 220, 255, .18); border-radius: 8px; }
+  ::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 8px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--line-3); }
   ::-webkit-scrollbar-track { background: transparent; }
+  :focus-visible { outline: 2px solid var(--c-idle); outline-offset: 2px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-  /* Header */
+  /* ---------- Header ---------- */
   header {
-    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px;
-    margin-top: 12px; padding: 9px 12px 9px 16px;
-    background: var(--glass); border: 1px solid var(--line); border-radius: var(--radius);
-    backdrop-filter: blur(14px) saturate(140%);
-    box-shadow: 0 8px 30px rgba(0, 0, 0, .35), inset 0 1px 0 rgba(255, 255, 255, .04);
+    position: relative; z-index: 30;
+    display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+    padding: var(--s3) var(--s1);
   }
-  .brand { display: flex; align-items: center; letter-spacing: .42em; font-weight: 600; font-size: 13px; color: var(--cyan); text-shadow: 0 0 12px rgba(56, 232, 255, .65); }
-  .brand::before {
-    content: ""; width: 8px; height: 8px; border-radius: 50%; margin-right: 12px;
-    background: var(--accent); box-shadow: 0 0 10px var(--accent), 0 0 3px var(--accent);
-    animation: blink 2.4s ease-in-out infinite; transition: background .4s, box-shadow .4s;
+  .brand { display: flex; align-items: center; gap: var(--s3); min-width: 0; }
+  .wordmark { font: 600 var(--fs-md)/1 var(--font-display); letter-spacing: .24em; color: var(--text); padding-left: .24em; }
+  .brand-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--accent); transition: background var(--t-med); }
+  body:not([data-state="idle"]):not([data-state="offline"]) .brand-dot { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .model, .taskchip {
+    font-size: var(--fs-xs); line-height: 1; color: var(--text-3); white-space: nowrap;
+    border: 1px solid var(--line-2); border-radius: var(--r-pill); padding: 5px 9px;
   }
-  @keyframes blink { 50% { opacity: .35; } }
-  .model { margin-left: 4px; font-size: 9.5px; letter-spacing: .18em; color: var(--muted); text-shadow: none; border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; text-transform: uppercase; font-weight: 500; }
   .model:empty { display: none; }
-  select { font: inherit; font-size: 12.5px; color: var(--text); background: rgba(10, 26, 44, .8); border: 1px solid var(--line); border-radius: 999px; padding: 5px 10px; max-width: 150px; cursor: pointer; }
-  select:hover, select:focus-visible { border-color: var(--line-hi); outline: none; }
-  select option { background: #061224; }
-  .controls { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-  .controls { position: relative; }
-  header { position: relative; z-index: 30; }
-  .settings { position: absolute; top: calc(100% + 8px); right: 0; z-index: 20; display: flex; flex-direction: column; gap: 8px; min-width: 230px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: rgba(6, 18, 32, .96); box-shadow: 0 10px 30px rgba(0, 0, 0, .45); }
-  .settings[hidden] { display: none; }
-  .settings label { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 12.5px; color: var(--muted); }
-
-  button {
-    font: inherit; font-size: 12.5px; color: var(--text); cursor: pointer;
-    background: rgba(10, 26, 44, .6); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px;
-    transition: border-color .2s, color .2s, background .2s, box-shadow .2s, transform .1s;
-  }
-  button:hover { border-color: var(--line-hi); background: var(--glass-hi); box-shadow: 0 0 14px rgba(56, 232, 255, .15); }
-  button:active { transform: scale(.97); }
-  button:focus-visible { outline: 1px solid var(--cyan); outline-offset: 2px; }
-  button.on { border-color: rgba(56, 232, 255, .65); color: var(--cyan); background: rgba(56, 232, 255, .09); box-shadow: 0 0 12px rgba(56, 232, 255, .22), inset 0 0 10px rgba(56, 232, 255, .08); }
-
-  main { display: flex; flex-direction: column; min-height: 0; gap: 10px; padding-top: 6px; }
-
-  /* Orb */
-  .stage { display: flex; flex-direction: column; align-items: center; flex: none; position: relative; }
-  .reactor {
-    position: relative; width: clamp(150px, 30vh, 250px); aspect-ratio: 1; cursor: pointer;
-    border-radius: 50%; transition: transform .25s;
-  }
-  .reactor:hover { transform: scale(1.025); }
-  .reactor canvas { position: absolute; inset: -14%; width: 128%; height: 128%; }
-  /* HUD corner brackets */
-  .reactor::before, .reactor::after {
-    content: ""; position: absolute; inset: -6%; pointer-events: none; opacity: .5;
-    border: 1px solid var(--accent); transition: border-color .5s;
-    -webkit-mask: linear-gradient(#000 0 0) top left / 16% 16% no-repeat, linear-gradient(#000 0 0) top right / 16% 16% no-repeat,
-                  linear-gradient(#000 0 0) bottom left / 16% 16% no-repeat, linear-gradient(#000 0 0) bottom right / 16% 16% no-repeat;
-  }
-  .reactor::after { inset: -9%; opacity: .18; border-radius: 50%; border-style: dashed; -webkit-mask: none; animation: spin 30s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
-
-  .wave { width: min(420px, 92%); height: 40px; display: block; margin-top: 4px; }
-  .state {
-    margin-top: 2px; font-size: 11px; letter-spacing: .38em; text-transform: uppercase; min-height: 18px;
-    color: var(--accent); text-shadow: 0 0 10px var(--accent); transition: color .4s; padding-left: .38em;
-  }
-  body[data-state="idle"] .state { color: var(--muted); text-shadow: none; }
-  body[data-state="permission"] .state, body[data-state="offline"] .state { animation: blink 1s ease-in-out infinite; }
-  .interim { font-style: italic; color: var(--teal); opacity: .85; min-height: 22px; text-align: center; padding: 0 12px; font-size: 14px; }
-
-  /* Transcript panel */
-  .panel {
-    flex: 1; min-height: 0; display: flex; flex-direction: column;
-    background: var(--glass); border: 1px solid var(--line); border-radius: var(--radius);
-    backdrop-filter: blur(14px) saturate(140%);
-    box-shadow: 0 10px 40px rgba(0, 0, 0, .4), inset 0 1px 0 rgba(255, 255, 255, .04);
-    overflow: hidden;
-  }
-  .panel-head {
-    display: flex; align-items: center; gap: 10px; padding: 8px 16px; flex: none;
-    font-size: 10px; letter-spacing: .32em; text-transform: uppercase; color: var(--muted);
-    border-bottom: 1px solid var(--line);
-  }
-  .panel-head::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--line-hi), transparent); }
-  .log {
-    flex: 1; overflow-y: auto; min-height: 0; padding: 12px 14px 16px;
-    display: flex; flex-direction: column; gap: 10px;
-    mask-image: linear-gradient(to bottom, transparent 0, #000 18px);
-  }
-  .log > * { animation: rise .35s cubic-bezier(.2, .8, .2, 1) both; }
-  @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
-  .msg { max-width: 86%; padding: 9px 14px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .msg.user {
-    align-self: flex-end; border-bottom-right-radius: 4px;
-    background: linear-gradient(135deg, rgba(56, 232, 255, .16), rgba(45, 255, 196, .08));
-    border: 1px solid rgba(56, 232, 255, .3);
-  }
-  .msg.eve {
-    align-self: flex-start; border-bottom-left-radius: 4px; position: relative;
-    background: rgba(8, 20, 36, .7); border: 1px solid var(--line);
-    box-shadow: inset 2px 0 0 rgba(56, 232, 255, .55);
-  }
-  .msg.reminder { align-self: center; color: var(--amber); border: 1px solid rgba(255,181,71,.4); background: rgba(255,181,71,.08); box-shadow: 0 0 18px rgba(255,181,71,.12); }
-  .msg.error { align-self: center; color: var(--red); border: 1px solid rgba(255,90,106,.4); background: rgba(255,90,106,.06); font-size: 13px; }
-  .msg.stat { align-self: flex-start; font-size: 11px; color: var(--muted); background: none; border: none; padding: 0 6px; margin-top: -4px; }
-  .msg.system { align-self: center; color: var(--muted); font-size: 13px; border: 1px dashed var(--line); }
-  .viz { margin: 8px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(4, 12, 24, .75); white-space: normal; }
-  .viz-title { font-size: 13px; color: var(--cyan); margin-bottom: 6px; letter-spacing: .02em; }
-  .viz-svg { display: block; width: 100%; max-width: 460px; height: auto; }
-  .viz-t { font: 10px "Segoe UI", system-ui, sans-serif; fill: #8fb4c8; }
-  .viz-grid { stroke: rgba(120, 190, 220, .14); stroke-width: 1; }
-  .viz-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: 12px; color: var(--muted); }
-  .viz-legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; background: var(--c); margin-right: 6px; }
-  .viz-wait { color: var(--muted); font-size: 12.5px; font-style: italic; }
-  .tool { align-self: flex-start; font: 11.5px/1.4 "Cascadia Code", Consolas, monospace; color: var(--muted); padding-left: 6px; overflow-wrap: anywhere; opacity: .85; }
-  .tool::before { content: "⚙ "; color: var(--cyan-dim); }
-
-  /* Permission request card */
-  .perm {
-    align-self: stretch; border: 1px solid rgba(255,181,71,.5); background: rgba(255,181,71,.06); border-radius: 14px; padding: 10px 14px;
-    box-shadow: 0 0 22px rgba(255,181,71,.12), inset 0 0 18px rgba(255,181,71,.04);
-  }
-  .perm-title { color: var(--amber); font-weight: 600; }
-  .perm pre { max-height: 180px; }
-  .perm-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
-  .perm-actions .allow, .perm-actions .always { border-color: rgba(92,255,176,.5); color: var(--green); }
-  .perm-actions .allow:hover, .perm-actions .always:hover { box-shadow: 0 0 14px rgba(92,255,176,.25); }
-  .perm-actions .deny { border-color: rgba(255,90,106,.5); color: var(--red); }
-  .perm-actions .deny:hover { box-shadow: 0 0 14px rgba(255,90,106,.25); }
-  .perm-hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
-  .perm.task pre { white-space: pre-wrap; font-family: inherit; font-size: 13.5px; color: var(--text); }
-  .taskchip { margin-left: 8px; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--green, #5cffb0); border: 1px solid rgba(92,255,176,.45); border-radius: 999px; padding: 2px 8px; cursor: help; animation: blink 2s ease-in-out infinite; }
+  .taskchip { color: var(--c-ok); border-color: rgba(99, 220, 159, .35); cursor: help; }
   .taskchip[hidden] { display: none; }
-  button.auto-on { border-color: var(--amber, #ffb547); color: var(--amber, #ffb547); background: rgba(255,181,71,.10); box-shadow: 0 0 14px rgba(255,181,71,.25); }
-  .perm.done { opacity: .55; box-shadow: none; }
-  .perm-result { margin-top: 6px; font-size: 13px; color: var(--muted); }
+  .controls { position: relative; display: flex; align-items: center; gap: var(--s2); flex: none; }
+
+  /* ---------- Buttons ---------- */
+  button {
+    font: inherit; font-size: var(--fs-sm); line-height: 1; color: var(--text-2); cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px; min-height: 34px;
+    background: transparent; border: 1px solid var(--line-2); border-radius: var(--r-pill); padding: 0 var(--s3);
+    transition: border-color var(--t-fast), color var(--t-fast), background var(--t-fast);
+  }
+  button svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  button:hover:not(:disabled) { color: var(--text); border-color: var(--line-3); background: var(--bg-2); }
+  button:active:not(:disabled) { background: var(--bg-3); }
+  button:disabled { opacity: .4; cursor: default; }
+  /* Toggles: aria-pressed carries the state, the label stays the same */
+  button[aria-pressed="true"] { color: var(--text); border-color: var(--line-3); background: var(--bg-2); }
+  button[aria-pressed="true"] .tick { background: var(--c-ok); }
+  .tick { width: 6px; height: 6px; border-radius: 50%; background: var(--line-3); flex: none; transition: background var(--t-fast); }
+  #autoBtn[aria-pressed="true"] { color: var(--c-warn); border-color: rgba(243, 181, 82, .45); background: rgba(243, 181, 82, .08); }
+  #stopBtn:not(:disabled) { color: var(--text); border-color: rgba(255, 114, 114, .45); }
+  #stopBtn:not(:disabled):hover { background: rgba(255, 114, 114, .1); }
+  .btn-primary { color: #04121a; background: var(--text); border-color: var(--text); font-weight: 600; }
+  .btn-primary:hover:not(:disabled) { color: #04121a; background: #ffffff; border-color: #ffffff; }
+  kbd { font: var(--fs-xs) var(--font-mono); color: var(--text-3); border: 1px solid var(--line-2); border-radius: 4px; padding: 1px 4px; }
+
+  /* ---------- Settings popover ---------- */
+  .settings {
+    position: absolute; top: calc(100% + var(--s2)); right: 0; z-index: 20; width: 280px;
+    display: flex; flex-direction: column; padding: var(--s2);
+    border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--bg-2);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, .5);
+  }
+  .settings[hidden] { display: none; }
+  .settings label, .settings .row {
+    display: flex; justify-content: space-between; align-items: center; gap: var(--s3);
+    padding: var(--s2); font-size: var(--fs-sm); color: var(--text-2); border-radius: var(--r-sm);
+  }
+  .settings .row button { min-height: 30px; }
+  .settings hr { border: 0; border-top: 1px solid var(--line); margin: var(--s1) 0; }
+  .settings .wide { justify-content: center; width: 100%; border-color: transparent; color: var(--text-2); }
+  .settings .wide:hover { border-color: var(--line-2); }
+  select {
+    font: inherit; font-size: var(--fs-sm); color: var(--text); background: var(--bg-1);
+    border: 1px solid var(--line-2); border-radius: var(--r-sm); padding: 6px 8px; width: 150px; cursor: pointer;
+  }
+  select:hover { border-color: var(--line-3); }
+  select option { background: var(--bg-1); }
+
+  /* ---------- Layout ---------- */
+  main { display: flex; flex-direction: column; min-height: 0; gap: var(--s3); padding-bottom: var(--s3); }
+
+  /* Presence: the orb, what Eve is doing, and what she's hearing */
+  .stage { display: flex; align-items: center; gap: var(--s4); flex: none; min-width: 0; padding: 0 var(--s1); }
+  .reactor { position: relative; width: 76px; aspect-ratio: 1; flex: none; cursor: pointer; border-radius: 50%; transition: transform var(--t-med) var(--ease); }
+  .reactor:hover { transform: scale(1.04); }
+  .reactor:focus-visible { outline-offset: 6px; }
+  .reactor canvas { position: absolute; inset: -14%; width: 128%; height: 128%; pointer-events: none; }
+  .presence { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .wave { display: none; }
+  .state { font: 600 var(--fs-lg)/1.3 var(--font-display); color: var(--text); transition: color var(--t-med); }
+  .state::first-letter { text-transform: uppercase; }
+  .state-sub { font-size: var(--fs-sm); color: var(--text-3); }
+  body:not([data-state="idle"]) .state { color: var(--accent); }
+  .interim { font-size: var(--fs-sm); color: var(--c-listen); min-height: 1.4em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .interim:empty { display: none; }
+  .interim:not(:empty) + .state-sub { display: none; }
+
+  /* Conversation panel: transcript plus composer */
+  .panel {
+    flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column;
+    background: var(--bg-1); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden;
+  }
+  .log {
+    flex: 1; overflow-y: auto; min-height: 0; min-width: 0; padding: var(--s5) var(--s5) var(--s4);
+    display: flex; flex-direction: column; gap: var(--s3); scroll-behavior: smooth;
+  }
+  .log > * { animation: rise var(--t-med) var(--ease) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+
+  .msg { max-width: min(68ch, 100%); white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+  .msg.user {
+    align-self: flex-end; max-width: min(60ch, 85%); padding: 9px 14px;
+    background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 16px 16px 6px 16px;
+  }
+  .msg.eve { align-self: flex-start; padding: 2px 0 2px var(--s4); border-left: 2px solid rgba(98, 214, 240, .45); }
+  .msg.stat { align-self: flex-start; margin: calc(-1 * var(--s2)) 0 var(--s1) var(--s4); font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; white-space: normal; }
+  .msg.system { align-self: center; max-width: 52ch; text-align: center; font-size: var(--fs-sm); color: var(--text-3); padding: 0 var(--s4); }
+  .msg.reminder, .msg.error {
+    align-self: stretch; max-width: none; padding: var(--s3) var(--s4); white-space: normal;
+    border: 1px solid var(--line); border-left: 3px solid; border-radius: var(--r-sm); background: var(--bg-2);
+    display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  }
+  .msg.reminder { border-left-color: var(--c-warn); color: var(--text); }
+  .msg.error { border-left-color: var(--c-danger); color: var(--text); font-size: var(--fs-sm); }
+  .msg.error button { flex: none; }
+
+  /* Tool steps: running steps pulse, finished ones get a tick */
+  .tool { align-self: flex-start; display: flex; align-items: center; gap: var(--s2); padding-left: var(--s4); font-size: var(--fs-sm); color: var(--text-3); }
+  .tool::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c-think); flex: none; animation: pulse 1.2s ease-in-out infinite; }
+  .tool.done::before { content: "✓"; width: auto; height: auto; background: none; color: var(--c-ok); font-size: var(--fs-xs); animation: none; }
+  .tool.stopped::before { content: "–"; width: auto; height: auto; background: none; color: var(--text-3); animation: none; }
+  .tool + .tool { margin-top: calc(-1 * var(--s2)); }
+
+  /* Thinking placeholder while no words have arrived yet */
+  .working { align-self: flex-start; display: flex; gap: 5px; padding: var(--s2) 0 var(--s2) var(--s4); }
+  .working i { width: 6px; height: 6px; border-radius: 50%; background: var(--c-think); animation: pulse 1.2s ease-in-out infinite; }
+  .working i:nth-child(2) { animation-delay: .2s; }
+  .working i:nth-child(3) { animation-delay: .4s; }
+
+  /* Code and data blocks inside replies */
+  pre {
+    position: relative; margin: var(--s2) 0; padding: var(--s3) var(--s4); overflow-x: auto; white-space: pre;
+    font: var(--fs-sm)/1.55 var(--font-mono); color: #cfe3f1;
+    background: var(--bg-0); border: 1px solid var(--line); border-radius: var(--r-sm);
+  }
+  .msg.eve > pre:first-child { margin-top: 0; }
+  .codebox { position: relative; }
+  .copy { position: absolute; top: 6px; right: 6px; min-height: 26px; padding: 0 var(--s2); font-size: var(--fs-xs); background: var(--bg-2); opacity: 0; transition: opacity var(--t-fast); }
+  .codebox:hover .copy, .copy:focus-visible { opacity: 1; }
+  @media (hover: none) { .copy { opacity: 1; } }
+  .viz { margin: var(--s2) 0; padding: var(--s3) var(--s4); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--bg-0); white-space: normal; }
+  .viz-title { font-size: var(--fs-sm); font-weight: 600; color: var(--text); margin-bottom: var(--s2); }
+  .viz-svg { display: block; width: 100%; max-width: 460px; height: auto; }
+  .viz-t { font: 10px var(--font); fill: #93a8bb; }
+  .viz-grid { stroke: rgba(160, 196, 224, .12); stroke-width: 1; }
+  .viz-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: var(--s2); font-size: var(--fs-xs); color: var(--text-2); }
+  .viz-legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; background: var(--c); margin-right: 6px; }
+  .viz-wait { color: var(--text-3); font-size: var(--fs-sm); font-style: italic; }
+
+  /* Permission request: stays pinned to the bottom of the transcript until answered */
+  .perm {
+    align-self: stretch; min-width: 0; padding: var(--s4); white-space: normal;
+    background: var(--bg-2); border: 1px solid rgba(243, 181, 82, .45); border-radius: var(--r-md);
+    box-shadow: 0 -12px 24px var(--bg-1);
+  }
+  .perm:not(.done) { position: sticky; bottom: 0; z-index: 2; }
+  .perm-eyebrow { font-size: var(--fs-xs); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--c-warn); margin-bottom: var(--s1); }
+  .perm-title { font-weight: 600; color: var(--text); }
+  .perm pre { max-height: 180px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .perm.task pre { font-family: var(--font); color: var(--text-2); }
+  .perm-actions { display: flex; gap: var(--s2); flex-wrap: wrap; margin-top: var(--s3); }
+  .perm-actions .deny { color: var(--c-danger); border-color: rgba(255, 114, 114, .4); }
+  .perm-actions .deny:hover { background: rgba(255, 114, 114, .1); color: var(--c-danger); }
+  .perm-hint { color: var(--text-3); font-size: var(--fs-xs); margin-top: var(--s2); }
+  .perm.done { border-color: var(--line); background: transparent; box-shadow: none; padding: var(--s2) var(--s4); }
+  .perm.done pre, .perm.done .perm-eyebrow { display: none; }
+  .perm.done .perm-title { font-weight: 400; color: var(--text-2); font-size: var(--fs-sm); }
+  .perm-result { margin-top: 2px; font-size: var(--fs-sm); color: var(--text-3); }
+  .perm-result.allow, .perm-result.always { color: var(--c-ok); }
+  .perm-result.deny { color: var(--c-danger); }
+
   .banner {
-    display: flex; gap: 10px; align-items: center; justify-content: center; flex-wrap: wrap; padding: 8px 12px; font-size: 13px;
-    border: 1px solid var(--line-hi); border-radius: 12px; background: rgba(56, 232, 255, .07); box-shadow: 0 0 18px rgba(56, 232, 255, .12);
+    display: flex; gap: var(--s3); align-items: center; justify-content: space-between; padding: var(--s2) var(--s2) var(--s2) var(--s4);
+    font-size: var(--fs-sm); color: var(--text); border: 1px solid var(--line-2); border-radius: var(--r-md); background: var(--bg-2);
   }
   .banner[hidden] { display: none; }
-  pre { background: rgba(1, 4, 9, .85); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; overflow-x: auto; white-space: pre; font: 12.5px/1.5 "Cascadia Code", Consolas, monospace; margin: 6px 0; color: #bfe9f7; }
 
-  /* Input */
-  form { display: flex; gap: 8px; padding: 10px 0 calc(12px + env(safe-area-inset-bottom, 0px)); }
+  /* Starter suggestions, shown until the first request */
+  .hints { display: flex; flex-wrap: wrap; gap: var(--s2); padding: 0 var(--s5) var(--s3); }
+  .hints[hidden] { display: none; }
+  .hints button { min-height: 30px; font-size: var(--fs-xs); color: var(--text-2); }
+
+  /* Composer */
+  form { display: flex; align-items: center; gap: var(--s2); padding: var(--s3); border-top: 1px solid var(--line); background: var(--bg-1); }
   input[type=text] {
-    flex: 1; min-width: 0; font: inherit; color: var(--text);
-    background: var(--glass); border: 1px solid var(--line); border-radius: 999px; padding: 11px 18px; outline: none;
-    backdrop-filter: blur(14px); transition: border-color .2s, box-shadow .2s;
+    flex: 1; min-width: 0; font: inherit; color: var(--text); min-height: 44px;
+    background: var(--bg-0); border: 1px solid var(--line-2); border-radius: var(--r-pill); padding: 0 var(--s4); outline: none;
+    transition: border-color var(--t-fast);
   }
-  input[type=text]::placeholder { color: var(--muted); }
-  input[type=text]:focus { border-color: var(--line-hi); box-shadow: 0 0 0 3px rgba(56, 232, 255, .08), 0 0 18px rgba(56, 232, 255, .12); }
-  .mic {
-    width: 46px; height: 46px; padding: 0; display: grid; place-items: center; flex: none;
-    color: var(--cyan); border-color: rgba(56, 232, 255, .4);
-    background: radial-gradient(circle, rgba(56, 232, 255, .16), rgba(10, 26, 44, .6) 70%);
-  }
-  .mic svg { width: 20px; height: 20px; fill: currentColor; }
-  body[data-state="listening"] .mic { color: var(--teal); border-color: var(--teal); box-shadow: 0 0 0 0 rgba(45, 255, 196, .5); animation: ring 1.4s ease-out infinite; }
-  @keyframes ring { to { box-shadow: 0 0 0 12px rgba(45, 255, 196, 0); } }
+  input[type=text]::placeholder { color: var(--text-3); }
+  input[type=text]:focus { border-color: var(--line-3); }
+  input[type=text]:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(98, 214, 240, .18); }
+  .mic, .send { width: 44px; height: 44px; min-height: 44px; padding: 0; justify-content: center; flex: none; }
+  .mic svg, .send svg { width: 20px; height: 20px; }
+  .mic { color: var(--text); }
+  .send { color: #04121a; background: var(--text); border-color: var(--text); }
+  .send:hover:not(:disabled) { color: #04121a; background: #fff; }
+  .mic[hidden], .send[hidden] { display: none; }
+  body[data-state="listening"] .mic { color: #04121a; background: var(--c-listen); border-color: var(--c-listen); animation: ring 1.4s ease-out infinite; }
+  @keyframes ring { from { box-shadow: 0 0 0 0 rgba(63, 227, 180, .45); } to { box-shadow: 0 0 0 10px rgba(63, 227, 180, 0); } }
 
-  /* Boot overlay (browsers need a click before audio/mic) */
-  .boot {
-    position: fixed; inset: 0; display: grid; place-items: center; z-index: 10;
-    background: radial-gradient(circle at 50% 45%, rgba(8, 30, 52, .9), rgba(1, 3, 8, .97) 70%);
-    backdrop-filter: blur(6px);
-  }
-  .boot > div { display: flex; flex-direction: column; align-items: center; }
+  /* ---------- Start screen (browsers need one click before audio and the mic) ---------- */
+  .boot { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; background: var(--bg-0); }
+  .boot > div { display: flex; flex-direction: column; align-items: center; text-align: center; padding: var(--s5); }
   .boot-orb {
-    width: 120px; height: 120px; border-radius: 50%; margin-bottom: 30px; position: relative;
-    background: radial-gradient(circle, #eafcff 0%, var(--cyan) 22%, rgba(56, 232, 255, .15) 55%, transparent 70%);
-    box-shadow: 0 0 60px rgba(56, 232, 255, .35); animation: breathe 3s ease-in-out infinite;
+    width: 88px; height: 88px; border-radius: 50%; margin-bottom: var(--s5);
+    background: radial-gradient(circle, #f1fcff 0%, var(--c-idle) 26%, rgba(98, 214, 240, .14) 58%, transparent 72%);
+    animation: breathe 3.2s ease-in-out infinite;
   }
-  .boot-orb::before { content: ""; position: absolute; inset: -18px; border-radius: 50%; border: 1px solid rgba(56, 232, 255, .35); border-top-color: transparent; border-bottom-color: transparent; animation: spin 6s linear infinite; }
-  @keyframes breathe { 50% { transform: scale(1.08); box-shadow: 0 0 90px rgba(56, 232, 255, .5); } }
-  .boot button {
-    font-size: 14px; padding: 13px 34px; letter-spacing: .3em; border-color: var(--cyan); color: var(--cyan);
-    background: rgba(56, 232, 255, .06); box-shadow: 0 0 24px rgba(56, 232, 255, .25), inset 0 0 14px rgba(56, 232, 255, .1);
-  }
-  .boot button:hover { background: rgba(56, 232, 255, .14); box-shadow: 0 0 34px rgba(56, 232, 255, .45), inset 0 0 14px rgba(56, 232, 255, .15); }
-  .boot p { color: var(--muted); text-align: center; font-size: 13px; margin-top: 16px; }
+  @keyframes breathe { 50% { transform: scale(1.06); } }
+  .boot h1 { font: 600 1.75rem/1.2 var(--font-display); letter-spacing: .24em; padding-left: .24em; margin: 0 0 var(--s1); }
+  .boot .tagline { color: var(--text-3); font-size: var(--fs-sm); margin: 0 0 var(--s5); }
+  .boot button { min-height: 44px; padding: 0 var(--s6); font-size: var(--fs-md); }
+  .boot p#bootNote { color: var(--text-3); font-size: var(--fs-sm); margin: var(--s4) 0 0; max-width: 34ch; }
 
-  /* Wide windows: orb on the left, transcript on the right */
-  @media (min-width: 860px) and (min-height: 520px) {
-    body { max-width: 1180px; }
-    main { display: grid; grid-template-columns: minmax(300px, 1fr) 1.25fr; grid-template-rows: auto 1fr; gap: 14px; }
+  /* ---------- Wide windows: presence on the left, conversation on the right ---------- */
+  @media (min-width: 900px) and (min-height: 560px) {
+    body { max-width: 1240px; padding: 0 var(--s5); }
+    header { padding: var(--s4) 0; }
+    main { display: grid; grid-template-columns: minmax(280px, .85fr) minmax(0, 1.4fr); grid-template-rows: auto minmax(0, 1fr); gap: var(--s4) var(--s5); padding-bottom: var(--s5); }
     .banner { grid-column: 1 / -1; }
-    .stage { grid-column: 1; grid-row: 2; justify-content: center; }
-    .reactor { width: clamp(200px, 42vh, 320px); }
+    .stage { grid-column: 1; grid-row: 2; flex-direction: column; justify-content: center; gap: var(--s3); text-align: center; }
+    .reactor { width: clamp(180px, 34vh, 300px); }
+    .wave { display: block; width: min(360px, 90%); height: 36px; }
+    .presence { align-items: center; }
+    .interim { white-space: normal; max-width: 36ch; }
     .panel { grid-column: 2; grid-row: 2; }
-    form { max-width: none; }
   }
-  /* Scale with resolution: larger screens get a wider layout and bigger type */
-  @media (min-width: 1500px) and (min-height: 760px) {
-    body { max-width: min(1500px, 92vw); }
-    main { grid-template-columns: minmax(380px, 1fr) 1.3fr; }
-    .reactor { width: clamp(260px, 44vh, 460px); }
-    .msg { max-width: 80%; }
+  @media (min-width: 1600px) and (min-height: 800px) {
+    body { max-width: min(1560px, 92vw); }
+    .reactor { width: clamp(260px, 38vh, 420px); }
   }
-  @media (min-width: 2200px) and (min-height: 1100px) {
-    body { max-width: min(2000px, 90vw); }
-    .reactor { width: clamp(340px, 46vh, 640px); }
-    .wave { width: min(560px, 92%); height: 52px; }
-  }
-  /* Short or narrow windows: tighten spacing so nothing gets cut off */
+  /* Short windows */
   @media (max-height: 640px) {
-    header { margin-top: 6px; padding: 5px 10px 5px 14px; }
-    .reactor { width: clamp(110px, 24vh, 200px); }
-    .wave { height: 28px; }
-    .interim { min-height: 16px; font-size: 13px; }
-    form { padding-top: 6px; padding-bottom: 8px; }
+    header { padding: var(--s2) var(--s1); }
+    .log { padding: var(--s4) var(--s4) var(--s3); }
   }
-  @media (max-width: 520px) {
-    body { padding: 0 8px; }
-    .brand { letter-spacing: .28em; }
-    .msg { max-width: 94%; }
-    button { padding: 5px 10px; }
+  /* Phones: icon-only header controls, compact presence strip */
+  @media (max-width: 600px) {
+    body { padding: 0 var(--s2); }
+    header { padding: var(--s2) 0; }
+    .controls { gap: 6px; }
+    .controls > button .label, .model { display: none; }
+    .settings { width: min(280px, calc(100vw - 16px)); }
+    .controls > button { width: 36px; padding: 0; justify-content: center; }
+    .reactor { width: 56px; }
+    .state { font-size: var(--fs-md); }
+    .log { padding: var(--s4) var(--s3) var(--s3); }
+    .hints { padding: 0 var(--s3) var(--s3); }
+    .msg.user { max-width: 90%; }
+    .msg.eve { padding-left: var(--s3); }
+    .tool { padding-left: var(--s3); }
+    form { padding: var(--s2); }
   }
   @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation-duration: 0s !important; transition-duration: 0s !important; }
+    *, *::before, *::after { animation-duration: 0s !important; animation-iteration-count: 1 !important; transition-duration: 0s !important; scroll-behavior: auto !important; }
   }
+  #muteBtn[aria-pressed="true"] .ico-off, #muteBtn[aria-pressed="false"] .ico-on { display: none; }
 </style>
 </head>
 <body data-state="idle">
   <div class="boot" id="boot">
     <div>
-      <div class="boot-orb"></div>
-      <button id="bootBtn">INITIALIZE E.V.E.</button>
-      <p id="bootNote">Allow microphone access when asked.</p>
+      <div class="boot-orb" aria-hidden="true"></div>
+      <h1>EVE</h1>
+      <p class="tagline">Evolving Virtual Entity</p>
+      <button id="bootBtn" class="btn-primary">Start Eve</button>
+      <p id="bootNote">Your browser will ask for the microphone so you can talk to her. Typing works either way.</p>
     </div>
   </div>
 
   <header>
-    <div class="brand">E.V.E.<span class="model" id="model" title="Claude model Eve is currently using"></span><span class="taskchip" id="taskChip" hidden>● Working on approved plan</span></div>
+    <div class="brand">
+      <span class="brand-dot" aria-hidden="true"></span>
+      <span class="wordmark">EVE</span>
+      <span class="model" id="model" title="Claude model Eve is currently using"></span>
+      <span class="taskchip" id="taskChip" hidden>Approved plan running</span>
+    </div>
     <div class="controls">
-      <button id="muteBtn" title="Turn spoken replies on/off">Voice on</button>
-      <button id="autoBtn" title="Auto mode: Eve acts without asking permission (risky actions like shutdown still ask)">Auto: off</button>
-      <button id="stopBtn" title="Interrupt (Esc)">Stop</button>
-      <button id="settingsBtn" title="Settings: model, voice, language, wake word, new chat" aria-expanded="false" aria-controls="settingsPanel">&#9881; Settings</button>
-      <div class="settings" id="settingsPanel" hidden>
+      <button id="muteBtn" aria-pressed="true" title="Spoken replies (on)"><svg class="ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg><svg class="ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 6 6M22 9l-6 6"/></svg><span class="label">Voice</span></button>
+      <button id="autoBtn" aria-pressed="false" title="Auto mode: Eve acts without asking permission (shutdowns, disk wipes and similar still ask)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg><span class="label">Auto</span></button>
+      <button id="stopBtn" title="Stop Eve talking or working (Esc)" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span class="label">Stop</span></button>
+      <button id="settingsBtn" title="Settings: model, voice, language, wake word, new chat" aria-label="Settings" aria-expanded="false" aria-controls="settingsPanel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="label">Settings</span></button>
+      <div class="settings" id="settingsPanel" role="dialog" aria-label="Settings" hidden>
         <label>Model <select id="modelSel" title="Switch Eve's model (applies from her next reply)"><option value="auto">Auto</option><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option></select></label>
         <label>Voice <select id="voiceSel" title="Choose Eve's voice"></select></label>
         <label>Listening <select id="langSel" title="Language Eve listens for"><option value="fil-PH">Filipino / Taglish</option><option value="en-PH">English (PH)</option><option value="en-US">English (US)</option></select></label>
-        <button id="wakeBtn" title="Listen continuously for the wake word">Wake word</button>
-        <button id="newBtn" title="Start a fresh conversation (memory is kept)">New chat</button>
+        <div class="row">Wake word <button id="wakeBtn" aria-pressed="false" title="Listen continuously for the wake word"><span class="tick" aria-hidden="true"></span><span id="wakeLabel">Off</span></button></div>
+        <hr>
+        <button id="newBtn" class="wide" title="Clears the transcript. Long-term memory is kept.">Start a new chat</button>
       </div>
     </div>
   </header>
 
   <main>
-    <div class="banner" id="banner" hidden>Eve updated her interface. <button id="reloadBtn">Reload</button></div>
+    <div class="banner" id="banner" role="status" hidden><span>Eve's interface was updated.</span><button id="reloadBtn">Reload</button></div>
     <div class="stage">
-      <div class="reactor" id="reactor" title="Click to talk"><canvas id="orb"></canvas></div>
-      <canvas class="wave" id="wave"></canvas>
-      <div class="state" id="state">standby</div>
-      <div class="interim" id="interim"></div>
+      <div class="reactor" id="reactor" role="button" tabindex="0" aria-label="Talk to Eve" title="Click to talk (Ctrl+Space)"><canvas id="orb"></canvas></div>
+      <canvas class="wave" id="wave" aria-hidden="true"></canvas>
+      <div class="presence">
+        <div class="state" id="state" role="status" aria-live="polite">Ready</div>
+        <div class="interim" id="interim"></div>
+        <div class="state-sub" id="stateSub"></div>
+      </div>
     </div>
-    <section class="panel">
-      <div class="panel-head">Transcript</div>
-      <div class="log" id="log"></div>
+    <section class="panel" aria-label="Conversation">
+      <div class="log" id="log" role="log" aria-label="Transcript"></div>
+      <div class="hints" id="hints" aria-label="Suggestions">
+        <button type="button">What's on my screen?</button>
+        <button type="button">Remind me in 10 minutes to stretch</button>
+        <button type="button">What's on my to-do list?</button>
+        <button type="button">Give me my briefing</button>
+      </div>
+      <form id="form" autocomplete="off">
+        <label class="sr-only" for="input">Message Eve</label>
+        <input type="text" id="input" placeholder="Message Eve…">
+        <button type="button" class="mic" id="micBtn" aria-label="Talk to Eve" title="Push to talk (Ctrl+Space)"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+        <button type="submit" class="send" id="sendBtn" aria-label="Send" title="Send (Enter)" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+      </form>
     </section>
   </main>
-
-  <form id="form" autocomplete="off">
-    <input type="text" id="input" placeholder="Type a message or click the mic…">
-    <button type="button" class="mic" id="micBtn" title="Push to talk (Ctrl+Space)">
-      <svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2z"/></svg>
-    </button>
-  </form>
 
 <script>
 // ---------- Visuals: animated orb + waveform (purely cosmetic; reads body[data-state]) ----------
@@ -519,7 +588,19 @@ function render() {
   const state = offline ? 'offline' : perms.size ? 'permission' : base;
   document.body.dataset.state = state;
   fx.listen(base === 'listening');
-  $('state').textContent = { idle: wakeMode ? (convoOpen() ? 'listening for you' : `say "${CFG.wakeWord}"`) : 'standby', listening: 'listening', thinking: 'processing', speaking: 'speaking', permission: 'awaiting your ok', offline: 'reconnecting' }[state];
+  const wake = CFG.wakeWord.charAt(0).toUpperCase() + CFG.wakeWord.slice(1);
+  const [label, sub] = {
+    idle: !wakeMode ? ['Ready', 'Click the orb to talk, or type below'] : convoOpen() ? ['Listening for you', 'No need to say my name'] : ['Ready', `Say "${wake}", or type below`],
+    listening: ['Listening', 'Go ahead'],
+    thinking: ['Thinking', 'Press Esc to stop'],
+    speaking: ['Speaking', `Say "${wake}, stop" to interrupt`],
+    permission: ['Waiting for your OK', 'Approve or deny the request in the conversation'],
+    offline: ['Reconnecting', 'Lost the connection to Eve. Retrying by itself'],
+  }[state];
+  if ($('state').textContent !== label) $('state').textContent = label;
+  $('stateSub').textContent = sub;
+  $('stopBtn').disabled = !(busy || speaking || perms.size);
+  syncWorking();
   // Tell the server (and through it, the desktop overlay) what we're doing.
   if (base !== reportedState) { reportedState = base; postJson('/api/ui-state', { state: base }).catch(() => {}); }
 }
@@ -528,13 +609,40 @@ function addMsg(cls, text) {
   el.className = cls === 'tool' ? 'tool' : `msg ${cls}`;
   el.textContent = text;
   log.append(el);
+  if (cls === 'user') $('hints').hidden = true;
+  syncWorking();
   log.scrollTop = log.scrollHeight;
+  return el;
+}
+// Three pulsing dots at the end of the transcript while Eve works and no words have arrived yet.
+function syncWorking() {
+  let w = $('working');
+  if (busy && !replyEl && !perms.size) {
+    if (!w) { w = document.createElement('div'); w.id = 'working'; w.className = 'working'; w.setAttribute('aria-label', 'Eve is working'); w.innerHTML = '<i></i><i></i><i></i>'; }
+    if (w !== log.lastElementChild) log.append(w);
+  } else w?.remove();
+}
+// Tool steps are shown as running until the turn moves on (words arrive, it ends, or it's stopped).
+function markTools(how) { log.querySelectorAll('.tool:not(.done):not(.stopped)').forEach((t) => t.classList.add(how)); }
+// A failed request can be sent again with one click.
+let lastAsked = null;
+function addError(message) {
+  const el = addMsg('error', '');
+  const span = document.createElement('span');
+  span.textContent = message;
+  el.append(span);
+  if (lastAsked) {
+    const text = lastAsked, b = document.createElement('button');
+    b.textContent = 'Try again';
+    b.onclick = () => { b.disabled = true; send(text); };
+    el.append(b);
+  }
   return el;
 }
 // Minimal markdown: fenced code blocks become <pre>, everything else stays plain text.
 function renderReply(el, text) {
   el.replaceChildren();
-  text.split(/(```[\s\S]*?(?:```|$))/).forEach((part) => {
+  text.split(/(```[\s\S]*?(?:```|$))/).forEach((part, i, all) => {
     if (part.startsWith('```')) {
       const lang = (/^```(\w*)/.exec(part)?.[1] || '').toLowerCase();
       const body = part.replace(/^```[^\n]*\n?/, '').replace(/```$/, '');
@@ -547,11 +655,17 @@ function renderReply(el, text) {
         el.append(wait);
         return;
       }
-      const pre = document.createElement('pre');
-      pre.textContent = body;
-      el.append(pre);
+      const box = document.createElement('div'), pre = document.createElement('pre'), copy = document.createElement('button');
+      box.className = 'codebox'; pre.textContent = body;
+      copy.type = 'button'; copy.className = 'copy'; copy.textContent = 'Copy';
+      copy.onclick = () => navigator.clipboard.writeText(body).then(() => { copy.textContent = 'Copied'; setTimeout(() => { copy.textContent = 'Copy'; }, 1500); }, () => { copy.textContent = "Couldn't copy"; });
+      box.append(pre, copy);
+      el.append(box);
     } else if (part) {
-      el.append(part.replace(/\*\*(.+?)\*\*/g, '$1'));
+      // Blank lines next to a code block would add a big gap: the block has its own margin.
+      if (i > 0) part = part.replace(/^\s*\n/, '');
+      if (i < all.length - 1) part = part.replace(/\n\s*$/, '');
+      if (part) el.append(part.replace(/\*\*(.+?)\*\*/g, '$1'));
     }
   });
   log.scrollTop = log.scrollHeight;
@@ -823,7 +937,9 @@ function onDelta(text) {
   if (!replyEl) {
     text = text.replace(/^\s+/, ''); // new bubble after a tool call: drop the separator newlines
     if (!text) return;
+    markTools('done'); // words after tool steps mean those steps have returned
     replyEl = addMsg('eve', ''); replyText = ''; spokenLen = 0;
+    syncWorking();
   }
   replyText += text;
   fx.kick(.12);
@@ -863,7 +979,7 @@ events.onmessage = (e) => {
     case 'permission-resolved': resolvePermission(ev.id, ev.decision); break;
     case 'refreshed': replyEl = null; addMsg('system', '🧹 Context refreshed to stay fast. Memory intact.'); break;
     case 'restarting': replyEl = null; addMsg('system', '♻ Restarting to load my updates. Back in a moment.'); break;
-    case 'busy': busy = ev.busy; armAck(busy); render(); break;
+    case 'busy': busy = ev.busy; armAck(busy); if (!busy) markTools('done'); render(); break;
     case 'stats': {
       const sec = (ms) => (ms / 1000).toFixed(1) + ' s';
       addMsg('stat', [ev.model, ev.routedBy, sec(ev.ms) + (ev.ttft_ms ? ` (first word ${sec(ev.ttft_ms)})` : ''), ev.cost_usd ? '$' + ev.cost_usd.toFixed(3) : 'free', ev.tools ? `${ev.tools} tool${ev.tools > 1 ? 's' : ''}` : ''].filter(Boolean).join(' · '));
@@ -872,14 +988,14 @@ events.onmessage = (e) => {
     case 'user': if (ev.text !== lastSent) addMsg('user', ev.text); lastSent = null; break;
     case 'delta': onDelta(ev.text); break;
     case 'tool': replyEl = null; addMsg('tool', `${ev.sub ? '↳ ' : ''}${ev.label || friendlyTool(ev.name)}`); break;
-    case 'done': onDone(); break;
-    case 'error': replyEl = null; addMsg('error', ev.message); chime(220); break;
+    case 'done': markTools('done'); onDone(); break;
+    case 'error': replyEl = null; markTools('stopped'); addError(ev.message); chime(220); break;
     case 'reminder':
       addMsg('reminder', `⏰ ${ev.text}`); chime(660); setTimeout(() => chime(990), 180);
       say(`Pardon the interruption, ${CFG.honorific}. Reminder: ${ev.text}`);
       if (Notification.permission === 'granted') new Notification('EVE reminder', { body: ev.text });
       break;
-    case 'reset': log.replaceChildren(); addMsg('eve', 'Fresh conversation. My long-term memory is intact.'); break;
+    case 'reset': log.replaceChildren(); addMsg('eve', 'Fresh conversation. My long-term memory is intact.'); $('hints').hidden = false; break;
   }
 };
 
@@ -920,19 +1036,22 @@ function showPermission(req) {
   replyEl = null;
   const el = document.createElement('div');
   el.className = 'perm';
+  const eyebrow = document.createElement('div');
+  eyebrow.className = 'perm-eyebrow';
+  eyebrow.textContent = req.kind === 'task' ? 'Plan needs your approval' : 'Permission needed';
   const title = document.createElement('div');
   title.className = 'perm-title';
-  title.textContent = `🔐 May I ${req.title}?`;
-  el.append(title);
+  title.textContent = `May I ${req.title}?`;
+  el.append(eyebrow, title);
   if (req.detail) { const pre = document.createElement('pre'); pre.textContent = req.detail; el.append(pre); }
   const row = document.createElement('div');
   row.className = 'perm-actions';
   const isTask = req.kind === 'task';
-  if (isTask) { el.classList.add('task'); title.textContent = '🔐 May I go ahead with this plan? I won\'t ask again until it\'s done.'; }
-  const choices = isTask ? [['Approve plan', 'allow'], ['Deny', 'deny']] : [['Allow', 'allow'], ['Allow for this session', 'always'], ['Deny', 'deny']];
+  if (isTask) { el.classList.add('task'); title.textContent = 'May I go ahead with this plan? I won\'t ask again until it\'s done.'; }
+  const choices = isTask ? [['Approve plan', 'allow'], ['Deny', 'deny']] : [['Allow once', 'allow'], ['Allow for this session', 'always'], ['Deny', 'deny']];
   for (const [label, decision] of choices) {
     const b = document.createElement('button');
-    b.textContent = label; b.className = decision;
+    b.textContent = label; b.className = decision === 'allow' ? 'allow btn-primary' : decision;
     b.onclick = () => answerPermission(req.id, decision);
     row.append(b);
   }
@@ -956,7 +1075,7 @@ function resolvePermission(id, decision) {
   el.classList.add('done');
   el.querySelector('.perm-hint')?.remove();
   const result = document.createElement('div');
-  result.className = 'perm-result';
+  result.className = `perm-result ${decision}`;
   const labels = el.dataset.kind === 'task'
     ? { allow: '✓ Plan approved. Eve will handle the rest.', deny: '✕ Plan declined', cancelled: '— Cancelled' }
     : { allow: '✓ Allowed', always: '✓ Allowed for this session', deny: '✕ Denied', cancelled: '— Cancelled' };
@@ -984,20 +1103,21 @@ async function send(text) {
   if (answerByVoice(text)) return;
   shutUp();
   if (voiceCommand(text)) return; // handled right here, no round trip to Claude
-  lastSent = text;
+  lastSent = lastAsked = text;
   convoRearm(10 * 60000); // stays open while she works; re-armed to 30s once she finishes speaking
   addMsg('user', text);
   // A new request while Eve is still working replaces the old one instead of queueing behind it.
   const interrupt = busy;
-  if (interrupt) replyEl = null;
-  const r = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, interrupt }) });
-  if (!r.ok) addMsg('error', `Request failed (${r.status})`);
+  if (interrupt) { replyEl = null; markTools('stopped'); }
+  const r = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, interrupt }) }).catch(() => null);
+  if (!r) addError("Couldn't reach Eve. Check that she's running.");
+  else if (!r.ok) addError(`That request didn't go through (error ${r.status}).`);
 }
 function postJson(path, body = {}) {
   return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 }
 const post = (path) => postJson(path);
-function stopAll() { shutUp(); post('/api/stop'); replyEl = null; }
+function stopAll() { shutUp(); post('/api/stop'); replyEl = null; markTools('stopped'); }
 
 // ---------- Speech recognition ----------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1209,9 +1329,10 @@ function talk() {
 
 // ---------- Controls ----------
 function updateButtons() {
-  $('wakeBtn').classList.toggle('on', wakeMode);
-  $('muteBtn').classList.toggle('on', voiceOn);
-  $('muteBtn').textContent = voiceOn ? 'Voice on' : 'Voice off';
+  $('wakeBtn').setAttribute('aria-pressed', String(wakeMode));
+  $('wakeLabel').textContent = wakeMode ? 'On' : 'Off';
+  $('muteBtn').setAttribute('aria-pressed', String(voiceOn));
+  $('muteBtn').title = `Spoken replies (${voiceOn ? 'on' : 'off'})`;
   render();
 }
 $('wakeBtn').onclick = () => {
@@ -1227,15 +1348,19 @@ $('newBtn').onclick = () => { stopAll(); post('/api/reset'); };
 let autoOn = false;
 function setAuto(on) {
   autoOn = !!on;
-  $('autoBtn').classList.toggle('on', autoOn);
-  $('autoBtn').classList.toggle('auto-on', autoOn);
-  $('autoBtn').textContent = autoOn ? '⚡ Auto: on' : 'Auto: off';
+  $('autoBtn').setAttribute('aria-pressed', String(autoOn));
 }
 $('autoBtn').onclick = () => postJson('/api/auto', { on: !autoOn });
 $('micBtn').onclick = talk;
 $('reactor').onclick = talk;
-$('form').onsubmit = (e) => { e.preventDefault(); send($('input').value); $('input').value = ''; };
+$('reactor').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); talk(); } };
+// The mic button becomes a send button while there's text to send.
+const syncComposer = () => { const has = !!$('input').value.trim(); $('sendBtn').hidden = !has; $('micBtn').hidden = has; };
+$('input').addEventListener('input', syncComposer);
+$('form').onsubmit = (e) => { e.preventDefault(); send($('input').value); $('input').value = ''; syncComposer(); };
+$('hints').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) send(b.textContent); });
 document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('settingsPanel').hidden) { closeSettings(); $('settingsBtn').focus(); return; }
   if (e.key === 'Escape') stopAll();
   if (e.code === 'Space' && e.ctrlKey) { e.preventDefault(); talk(); }
 });
@@ -1269,8 +1394,9 @@ $('settingsBtn').addEventListener('click', (e) => {
   $('settingsPanel').hidden = !open;
   $('settingsBtn').setAttribute('aria-expanded', String(open));
 });
+function closeSettings() { $('settingsPanel').hidden = true; $('settingsBtn').setAttribute('aria-expanded', 'false'); }
 document.addEventListener('click', (e) => {
-  if (!$('settingsPanel').hidden && !e.target.closest('#settingsPanel, #settingsBtn')) { $('settingsPanel').hidden = true; $('settingsBtn').setAttribute('aria-expanded', 'false'); }
+  if (!$('settingsPanel').hidden && !e.target.closest('#settingsPanel, #settingsBtn')) closeSettings();
 });
 // Plain phrase for a tool call (the server normally sends ev.label); raw commands are never shown.
 function friendlyTool(name = '') {
