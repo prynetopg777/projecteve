@@ -58,6 +58,7 @@ const flag = (name) => { const i = rest.indexOf(name); return i >= 0 ? rest.spli
 const tag = flag('--tag');
 const source = flag('--source');
 const expires = toDate(flag('--expires'));
+const force = rest.includes('--force') && !!rest.splice(rest.indexOf('--force'), 1);
 const arg = rest.join(' ').trim();
 const quoted = rest.map((x) => x.trim());
 const show = (r) => console.log(`#${r.id} [${r.ts.slice(0, 10)}${r.tag ? ' ' + r.tag : ''}] ${r.text}`
@@ -74,9 +75,24 @@ function toDate(s) {
   if (isNaN(d)) { console.log(`Couldn't read the date "${s}".`); process.exit(1); }
   return d.toISOString();
 }
+// Semantic deduplication (lightweight): word-overlap similarity, so near-identical notes don't pile up or crowd search.
+const STOP = new Set('a an the is are was were to of in on at for and or but with by it its this that be has have had i you user they them their my me as from'.split(' '));
+const words = (s) => new Set((s.toLowerCase().match(/[a-z0-9']+/g) || []).filter((w) => !STOP.has(w)));
+function similarity(a, b) {
+  const x = words(a), y = words(b);
+  if (!x.size || !y.size) return 0;
+  let both = 0;
+  for (const w of x) if (y.has(w)) both++;
+  return both / (x.size + y.size - both);
+}
+const ftsAny = (s) => [...words(s)].map((w) => `"${w.replace(/"/g, '')}"*`).join(' OR ');
 function drop(r) { db.prepare("INSERT INTO mem_fts (mem_fts, rowid, text, tag) VALUES ('delete', ?, ?, ?)").run(r.id, r.text, r.tag); }
 
 if (cmd === 'add' && arg) {
+  const q = ftsAny(arg);
+  const near = q && db.prepare(`SELECT m.* FROM mem_fts f JOIN mem m ON m.id = f.rowid WHERE mem_fts MATCH ? AND ${live} ORDER BY bm25(mem_fts) LIMIT 5`).all(q, now)
+    .find((r) => similarity(r.text, arg) >= 0.85);
+  if (near && !force) { console.log(`Already remembered as #${near.id}: ${near.text}\n(use "update ${near.id} ..." to change it, or add --force to keep both)`); process.exit(0); }
   const { lastInsertRowid: id } = db.prepare('INSERT INTO mem (ts, tag, text, source, expires) VALUES (?, ?, ?, ?, ?)').run(now, tag, arg, source, expires);
   db.prepare('INSERT INTO mem_fts (rowid, text, tag) VALUES (?, ?, ?)').run(id, arg, tag);
   console.log(`Remembered #${id}.`);
@@ -91,8 +107,14 @@ if (cmd === 'add' && arg) {
   console.log(`Updated #${r.id}.`);
 } else if (cmd === 'search' && arg) {
   const q = arg.split(/\s+/).map((w) => `"${w.replace(/"/g, '')}"*`).join(' OR ');
-  const rows = db.prepare(`SELECT m.* FROM mem_fts f JOIN mem m ON m.id = f.rowid WHERE mem_fts MATCH ? AND ${live} ORDER BY bm25(mem_fts) LIMIT 10`).all(q, now);
-  rows.length ? rows.forEach(show) : console.log('Nothing found.');
+  const found = db.prepare(`SELECT m.* FROM mem_fts f JOIN mem m ON m.id = f.rowid WHERE mem_fts MATCH ? AND ${live} ORDER BY bm25(mem_fts) LIMIT 25`).all(q, now);
+  // Fold near-duplicates into the best-ranked match; the folded ids stay visible so no evidence is lost.
+  const rows = [];
+  for (const r of found) {
+    const twin = rows.find((k) => similarity(k.text, r.text) >= 0.7);
+    if (twin) (twin.similar ||= []).push(r.id); else if (rows.length < 10) rows.push(r);
+  }
+  rows.length ? rows.forEach((r) => { show(r); if (r.similar) console.log(`   (+ similar: ${r.similar.map((i) => '#' + i).join(', ')})`); }) : console.log('Nothing found.');
 } else if (cmd === 'list') {
   db.prepare(`SELECT * FROM mem m WHERE ${live} ORDER BY id DESC LIMIT ?`).all(now, Number(arg) || 10).forEach(show);
 } else if (cmd === 'expired') {

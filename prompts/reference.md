@@ -15,7 +15,12 @@ Details that don't need to be in every conversation. Paths are relative to Eve's
 - `node tools/usage.mjs [days]` summarises usage per day and model (from data/usage.jsonl): tokens, cache hit rate, cost, cost per successful task, model and tool calls, average time and time to first token, local tok/s, ok/error/interrupted counts and escalations. Add `--html` for a browser dashboard with system stats; `usage.mjs sys` prints CPU, RAM, GPU and VRAM.
 - Budgets (defaults in src/brain.mjs, override with a `"budget"` object in config.json): `turnUsd` 1.5, `dailyUsd` 15, `turnTokens` 1.5M, `contextTokens` 120k, `toolCalls` 60 and `repeatCalls` 4 per reply (the loop guard interrupts the reply). 0 disables a check. Alerts arrive as system notes.
 - On Auto, a reply that errors makes the next message run one model up (logged as an escalation). Context refreshes at `refreshTokens`/`refreshTurns`; prompt caching is handled by the Claude CLI.
-- `node tools/local.mjs [--model name] [--max n] [--json] "prompt"` runs a local Ollama model (starts the server if needed); `local.mjs models` lists them.
+- More budget keys: `agents` 6 sub-agents per reply, `dailyHardUsd` 30 (past it, every reply runs on haiku until midnight). Set `"fastPaths": false` in config.json to turn off code-only replies (src/fastpath.mjs: time, date, relative reminders, opening exact-match apps).
+- Compaction: at 75% of `refreshTokens` you're asked to write `workspace/memory/session-state.md`; after a refresh you're told to read it.
+- `node tools/cache.mjs get|set|run|list|clear` is the tool-result cache in data/cache/ (separate from prompt caching).
+- `node tools/eval.mjs checks` runs offline tests (fast paths, cache, memory dedup); `eval.mjs compare <commit|date> [days]` compares cost, tokens, cache hit, latency, success and fast-path share before vs after a change. Run both after any optimisation.
+- `memory.mjs add` refuses near-duplicates (use `update` or `--force`); `search` folds similar notes into one result and lists their ids.
+- `node tools/local.mjs [--model name] [--max n] [--ctx 4096] [--json] "prompt"` (models are Q4_K_M; one job at a time; servers it starts use flash attention and an 8-bit KV cache) runs a local Ollama model (starts the server if needed); `local.mjs models` lists them.
 - `node tools/screenshot.mjs` saves the primary screen to data/screen.png and prints the path; then Read that image. Only when the user asks about their screen.
 
 ## Improving yourself

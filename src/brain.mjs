@@ -10,6 +10,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { DATA_DIR, ROOT, WORKSPACE } from './config.mjs';
 import { describe, grantKey, isAutoAllowed, isTaskDone } from './permissions.mjs';
+import { fastPath } from './fastpath.mjs';
 
 const SESSION_FILE = path.join(DATA_DIR, 'session.json');
 const TASK_FILE = path.join(DATA_DIR, 'task.json'); // the plan the user approved; survives self-restarts
@@ -22,7 +23,7 @@ const PERMISSION_TIMEOUT_MS = 3 * 60 * 1000;
 const USAGE_FILE = path.join(DATA_DIR, 'usage.jsonl'); // one line per turn; summarised by tools/usage.mjs
 const WEB_TOOLS = new Set(['WebFetch', 'WebSearch']);
 // Budget alerts (override any of these with a "budget" object in config.json). 0 turns a check off.
-const BUDGET = { turnUsd: 1.5, dailyUsd: 15, turnTokens: 1500000, contextTokens: 120000, toolCalls: 60, repeatCalls: 4 };
+const BUDGET = { turnUsd: 1.5, dailyUsd: 15, turnTokens: 1500000, contextTokens: 120000, toolCalls: 60, repeatCalls: 4, agents: 6, dailyHardUsd: 30 };
 
 export class Brain extends EventEmitter {
   constructor(cfg) {
@@ -56,7 +57,8 @@ export class Brain extends EventEmitter {
     this.sessionId = null;
     writeJson(SESSION_FILE, { sessionId: null });
     this.turns = 0;
-    this.note('Your conversation was refreshed to stay fast; your memory notes are intact. Read memory/recent.md now (silently) to pick up where you and the user left off.');
+    this.compactNoted = false;
+    this.note('Your conversation was refreshed to stay fast; your memory notes are intact. Read memory/recent.md and memory/session-state.md now (silently) to pick up where you and the user left off.');
     this.emit('refreshed');
     return true;
   }
@@ -105,6 +107,7 @@ export class Brain extends EventEmitter {
   /** The model Eve has chosen (falls back to config.model). */
   get model() {
     const m = readJson(MODEL_FILE).model;
+    if (this.capped) return 'haiku'; // over the hard daily spending cap
     if (m === 'auto') return this.autoPick || 'sonnet';
     return MODELS.includes(m) ? m : this.cfg.model;
   }
@@ -196,7 +199,12 @@ export class Brain extends EventEmitter {
     const run = () =>
       new Promise((resolve, reject) => {
         // Eve switched models during the last turn: restart the process on the new model, same conversation.
+        const fast = fastPath(text, this.cfg);
+        if (fast) return this.#fastReply(text, fast, resolve);
         this.#maybeRefresh();
+        const capped = !!this.budget.dailyHardUsd && spentToday() >= this.budget.dailyHardUsd;
+        if (capped && !this.capped) this.note(`Hard spending cap: today passed $${this.budget.dailyHardUsd}, so you're on haiku until midnight. Tell the user once, briefly; they can raise budget.dailyHardUsd in config.json.`);
+        this.capped = capped;
         let escalated = false;
         if (readJson(MODEL_FILE).model === 'auto') {
           const pick = this.#takeHint() || this.#pickModel(text);
@@ -378,6 +386,11 @@ export class Brain extends EventEmitter {
         status: turn.interrupted ? 'interrupted' : failed ? 'error' : 'ok',
       });
       this.#checkBudget(entry);
+      // Compaction: before the context gets refreshed, have Eve write down what must survive it.
+      if (this.cfg.autoRefresh !== false && !this.compactNoted && tokens >= 0.75 * (this.cfg.refreshTokens || 60000)) {
+        this.compactNoted = true;
+        this.note('Context is getting long and will be refreshed soon. In this reply, also overwrite memory/session-state.md (silently) with: unresolved tasks and next steps, decisions made and why, exact error messages, ids, paths and code that still matter (verbatim), and finished work as one line each. Keep it under 40 lines.');
+      }
       // Auto routing: a failed turn on a lighter model retries the next message one model up.
       if (failed && readJson(MODEL_FILE).model === 'auto') this.escalate = MODELS[Math.min(MODELS.indexOf(this.runningModel) + 1, MODELS.length - 1)];
       setImmediate(() => this.#maybeRefresh()); // after this turn settles; skipped if another turn already started
@@ -427,8 +440,10 @@ export class Brain extends EventEmitter {
     const sig = block.name + JSON.stringify(block.input || {});
     const seen = (turn.sigs.get(sig) || 0) + 1;
     turn.sigs.set(sig, seen);
-    const { toolCalls, repeatCalls } = this.budget;
-    const why = repeatCalls && seen >= repeatCalls ? `called ${block.name} with the same input ${seen} times`
+    if (block.name === 'Agent' || block.name === 'Task') turn.agents = (turn.agents || 0) + 1;
+    const { toolCalls, repeatCalls, agents } = this.budget;
+    const why = agents && turn.agents > agents ? `started more than ${agents} sub-agents in one reply`
+      : repeatCalls && seen >= repeatCalls ? `called ${block.name} with the same input ${seen} times`
       : toolCalls && turn.tools >= toolCalls ? `made ${turn.tools} tool calls in one reply` : '';
     if (!why) return;
     turn.guarded = true;
@@ -453,6 +468,19 @@ export class Brain extends EventEmitter {
     const text = `Budget alert: ${alerts.join('; ')}.`;
     this.note(`${text} Mention it to the user in one short sentence, and prefer lighter models and fewer tool calls for a while.`);
     this.emit('alert', text);
+  }
+
+  /** Reply to a fast-path request without the model; Eve hears about it with the next message. */
+  #fastReply(text, fast, resolve) {
+    const t0 = Date.now();
+    this.emit('busy', true);
+    this.emit('delta', fast.reply);
+    saveRecent(text, fast.reply);
+    this.note(`Handled without you (fast path "${fast.name}"): the user said "${text}" and was told "${fast.reply}".`);
+    logUsage('fast', {}, { cost_usd: 0, ms: Date.now() - t0, status: 'ok', fast: fast.name });
+    this.emit('done', fast.reply);
+    this.emit('busy', false);
+    resolve(fast.reply);
   }
 
   #delta(text) {
