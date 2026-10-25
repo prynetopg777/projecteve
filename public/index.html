@@ -371,6 +371,7 @@
     </div>
     <div class="controls">
       <button id="muteBtn" aria-pressed="true" title="Spoken replies (on)"><svg class="ico-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg><svg class="ico-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="m16 9 6 6M22 9l-6 6"/></svg><span class="label">Voice</span></button>
+      <button id="micMuteBtn" aria-pressed="false" title="Mute the microphone: Eve stops listening until you unmute"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span class="label">Mic</span></button>
       <button id="autoBtn" aria-pressed="false" title="Auto mode: Eve acts without asking permission (shutdowns, disk wipes and similar still ask)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg><span class="label">Auto</span></button>
       <button id="stopBtn" title="Stop Eve talking or working (Esc)" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg><span class="label">Stop</span></button>
       <button id="settingsBtn" title="Settings: model, voice, language, wake word, new chat" aria-label="Settings" aria-expanded="false" aria-controls="settingsPanel"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span class="label">Settings</span></button>
@@ -1136,7 +1137,7 @@ function stopAll() { shutUp(); post('/api/stop'); replyEl = null; markTools('sto
 
 // ---------- Speech recognition ----------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, wakeMode = false, pushToTalk = false, awaitingCommand = 0, paused = false;
+let rec = null, wakeMode = false, pushToTalk = false, awaitingCommand = 0, paused = false, micMuted = false;
 // Extra ways the recognizer mishears "Eve" (especially with the Filipino model).
 const EXTRA_ALIASES = ['eeve', 'evi', 'ebi', 'ibi', 'ava', 'iva', 'evo', 'ebby', 'eevee'];
 const wakeList = [...new Set([CFG.wakeWord, ...(CFG.wakeAliases || []), ...EXTRA_ALIASES].map((w) => w.toLowerCase()))];
@@ -1167,7 +1168,7 @@ const stopRe = new RegExp(`^((?:${wakeNames})[, ]+)?(${STOP_WORDS})\\.?$`, 'i');
 // Each recognizer instance `r` only touches shared state while it is still the current `rec`,
 // so aborting one and starting another can't race.
 function startRec() {
-  if (!SR || rec || (paused && !pushToTalk)) return;
+  if (!SR || rec || micMuted || (paused && !pushToTalk)) return;
   const r = new SR();
   rec = r;
   r.ptt = pushToTalk;
@@ -1335,6 +1336,7 @@ function resumeRecognition() { paused = false; if (wakeMode && !rec) startRec();
 
 function talk() {
   if (!SR) return addMsg('error', 'Speech recognition is not supported in this browser. Use Edge or Chrome.');
+  if (micMuted) return addMsg('system', 'The mic is muted. Unmute it to talk.');
   shutUp();
   if (rec) { const old = rec; rec = null; old.abort(); }
   pushToTalk = true; clearUtterance();
@@ -1348,8 +1350,16 @@ function updateButtons() {
   $('wakeLabel').textContent = wakeMode ? 'On' : 'Off';
   $('muteBtn').setAttribute('aria-pressed', String(voiceOn));
   $('muteBtn').title = `Spoken replies (${voiceOn ? 'on' : 'off'})`;
+  $('micMuteBtn').setAttribute('aria-pressed', String(micMuted));
+  $('micMuteBtn').querySelector('.label').textContent = micMuted ? 'Mic off' : 'Mic';
   render();
 }
+$('micMuteBtn').onclick = () => {
+  micMuted = !micMuted;
+  if (micMuted) { if (rec && !rec.ptt) { clearUtterance(); rec.abort(); } }
+  else if (wakeMode) startRec();
+  updateButtons();
+};
 $('wakeBtn').onclick = () => {
   wakeMode = !wakeMode;
   if (wakeMode) startRec(); else if (rec) rec.abort();
@@ -1487,6 +1497,42 @@ async function openThings() {
   $('thingsClose').focus();
   renderThings(null);
   try { renderThings(await (await fetch('/api/things')).json()); } catch { renderThings('error'); }
+  renderHealth();
+}
+// System health: every part of Eve as a coloured dot (from /api/health).
+async function renderHealth() {
+  const list = $('thingsList');
+  const sec = thingsSection('System health');
+  const note = Object.assign(document.createElement('p'), { textContent: 'Checking…' });
+  sec.append(note);
+  list.append(sec);
+  try {
+    const h = await (await fetch('/api/health')).json();
+    const dot = { green: '#22c55e', amber: '#f59e0b', red: '#ef4444' };
+    note.textContent = h.ok ? 'All systems go.' : 'Something needs attention.';
+    // Stacked bar: one segment per status level, widths follow how many parts are in each.
+    const counts = { green: 0, amber: 0, red: 0 };
+    h.items.forEach((i) => { if (i.level in counts) counts[i.level]++; });
+    const bar = document.createElement('div');
+    bar.setAttribute('role', 'img'); bar.setAttribute('aria-label', `${counts.green} healthy, ${counts.amber} warning, ${counts.red} down`);
+    bar.style.cssText = 'display:flex;height:8px;border-radius:4px;overflow:hidden;margin:var(--s1) 0 var(--s2);background:rgba(160,196,224,.15)';
+    for (const level of ['green', 'amber', 'red']) {
+      if (!counts[level]) continue;
+      const seg = document.createElement('div');
+      seg.style.cssText = `flex:${counts[level]};background:${dot[level]}`;
+      bar.append(seg);
+    }
+    sec.append(bar);
+    for (const i of h.items) {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:var(--s2);padding:var(--s1) 0;align-items:flex-start';
+      const d = document.createElement('span'); d.textContent = '●'; d.style.color = dot[i.level] || 'inherit'; d.setAttribute('aria-label', i.level);
+      const name = document.createElement('strong'); name.textContent = i.name; name.style.whiteSpace = 'nowrap';
+      const detail = document.createElement('span'); detail.textContent = i.detail; detail.style.opacity = '.85';
+      row.append(d, name, detail);
+      sec.append(row);
+    }
+  } catch { note.textContent = "Couldn't check health."; }
 }
 function thingsSection(title) {
   const sec = document.createElement('section');
@@ -1525,6 +1571,22 @@ function renderThings(data) {
       openThings();
     }));
   }
+  // Memory at a glance: profile facts per heading, searchable notes by tag, notes added over the last two weeks.
+  const glance = thingsSection('Memory at a glance');
+  const heads = [];
+  for (const line of data.profile.split('\n')) {
+    if (/^##\s+/.test(line)) heads.push({ name: line.replace(/^##\s+/, '').trim(), n: 0 });
+    else if (/^\s*-\s+\S/.test(line) && heads.length) heads[heads.length - 1].n++;
+  }
+  const m = data.memories || { total: 0, tags: [], days: [], links: 0 };
+  const facts = heads.reduce((a, h) => a + h.n, 0);
+  glance.append(Object.assign(document.createElement('p'), { textContent: `${facts} profile fact${facts === 1 ? '' : 's'}, ${m.total} searchable note${m.total === 1 ? '' : 's'}, ${m.links} graph link${m.links === 1 ? '' : 's'}.` }));
+  const charts = [];
+  if (facts) charts.push({ type: 'bar', title: 'Profile facts by topic', x: heads.map((h) => h.name.split(/\s*&\s*|\s+and\s+/)[0]), series: [{ name: '', data: heads.map((h) => h.n) }] });
+  if (m.tags.length > 1) charts.push({ type: 'pie', title: 'Searchable notes by tag', x: m.tags.map((t) => t.tag), series: [{ data: m.tags.map((t) => t.n) }] });
+  else if (m.tags.length) charts.push({ type: 'bar', title: 'Searchable notes by tag', x: m.tags.map((t) => t.tag), series: [{ name: '', data: m.tags.map((t) => t.n) }] });
+  if (m.days.some((d) => d.n)) charts.push({ type: 'bar', title: 'Notes added, last 14 days', x: m.days.map((d) => d.d.slice(5)), series: [{ name: '', data: m.days.map((d) => d.n) }] });
+  for (const c of charts) { const v = drawChart(c); if (v) glance.append(v); }
   // Memory
   const mem = thingsSection('What I remember about you');
   const ta = document.createElement('textarea');
@@ -1541,7 +1603,18 @@ function renderThings(data) {
   const use = thingsSection("Today's spending");
   const cap = data.cap ? ` of $${data.cap} daily cap` : '';
   use.append(Object.assign(document.createElement('p'), { textContent: `$${data.spent.toFixed(2)} spent today${cap}.` }));
-  list.append(sched, mem, use);
+  if (data.cap) { // meter: how much of the daily cap is used (amber from 80%, red at the cap)
+    const pct = Math.min(100, (data.spent / data.cap) * 100);
+    const track = document.createElement('div');
+    track.setAttribute('role', 'meter'); track.setAttribute('aria-label', 'Share of daily cap used');
+    track.setAttribute('aria-valuemin', '0'); track.setAttribute('aria-valuemax', '100'); track.setAttribute('aria-valuenow', pct.toFixed(0));
+    track.style.cssText = 'height:8px;border-radius:4px;background:rgba(160,196,224,.15);overflow:hidden';
+    const fill = document.createElement('div');
+    fill.style.cssText = `height:100%;width:${pct.toFixed(1)}%;border-radius:4px;background:${pct >= 100 ? '#ef4444' : pct >= 80 ? '#f59e0b' : '#38e8ff'}`;
+    track.append(fill);
+    use.append(track);
+  }
+  list.append(sched, glance, mem, use);
 }
 document.addEventListener('click', (e) => {
   if (!$('settingsPanel').hidden && !e.target.closest('#settingsPanel, #settingsBtn')) closeSettings();

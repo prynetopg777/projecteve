@@ -5,9 +5,10 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { Brain, spentToday, readHistory } from './brain.mjs';
 import { checkHealth, healthPage } from './health.mjs';
-import { loadConfig, ROOT } from './config.mjs';
+import { loadConfig, ROOT, DATA_DIR } from './config.mjs';
 import * as reminders from './reminders.mjs';
 import { startReminderLoop } from './reminders.mjs';
 import * as su from './selfupdate.mjs';
@@ -162,6 +163,29 @@ function status() {
   return { state, busy: brain.busy, model: brain.runningModel || brain.model, pref: brain.modelPref, clients: clients.size, pending, reminder, task, auto: brain.autoMode };
 }
 
+// Searchable-memory overview for My things: notes per tag, notes added per day (last 14 days), graph links.
+function memoryStats() {
+  const file = path.join(DATA_DIR, 'memory.db');
+  if (!fs.existsSync(file)) return { total: 0, tags: [], days: [], links: 0 };
+  let db;
+  try {
+    db = new DatabaseSync(file, { readOnly: true });
+    // Expiry dates are stored as ISO strings by tools/memory.mjs, so compare against an ISO "now".
+    const live = `(expires IS NULL OR expires = '' OR expires > '${new Date().toISOString()}')`;
+    const has = (t) => db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(t);
+    const cols = db.prepare('PRAGMA table_info(mem)').all().map((c) => c.name);
+    const where = cols.includes('expires') ? `WHERE ${live}` : '';
+    const total = db.prepare(`SELECT COUNT(*) n FROM mem ${where}`).get().n;
+    const tags = db.prepare(`SELECT COALESCE(NULLIF(tag, ''), 'untagged') tag, COUNT(*) n FROM mem ${where} GROUP BY 1 ORDER BY n DESC LIMIT 8`).all();
+    const since = new Date(Date.now() - 13 * 864e5).toISOString().slice(0, 10);
+    const byDay = Object.fromEntries(db.prepare('SELECT substr(ts, 1, 10) d, COUNT(*) n FROM mem WHERE substr(ts, 1, 10) >= ? GROUP BY 1').all(since).map((r) => [r.d, r.n]));
+    const days = Array.from({ length: 14 }, (_, i) => { const d = new Date(Date.now() - (13 - i) * 864e5).toISOString().slice(0, 10); return { d, n: byDay[d] || 0 }; });
+    const links = has('edge') ? db.prepare('SELECT COUNT(*) n FROM edge').get().n : 0;
+    return { total, tags, days, links };
+  } catch { return { total: 0, tags: [], days: [], links: 0, error: true }; }
+  finally { db?.close(); }
+}
+
 const routes = {
   'POST /api/ask': async (req, res) => {
     const { text, interrupt } = await readJson(req);
@@ -203,6 +227,7 @@ const routes = {
       reminders: reminders.load().map((r) => ({ id: r.id, text: r.text, due: r.due, repeat: r.repeat })),
       watchers: watchers.load().map((w) => ({ id: w.id, type: w.type, target: w.target, text: w.text, message: w.message })),
       profile,
+      memories: memoryStats(),
       spent: spentToday(),
       cap: brain.budget?.dailyHardUsd || 0,
     });
