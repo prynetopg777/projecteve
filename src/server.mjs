@@ -8,10 +8,12 @@ import path from 'node:path';
 import { Brain, spentToday, readHistory } from './brain.mjs';
 import { checkHealth, healthPage } from './health.mjs';
 import { loadConfig, ROOT } from './config.mjs';
+import * as reminders from './reminders.mjs';
 import { startReminderLoop } from './reminders.mjs';
 import * as su from './selfupdate.mjs';
 import { speak } from './speak.mjs';
 import { synthesize, ttsAvailable } from './tts.mjs';
+import * as watchers from './watchers.mjs';
 import { startWatcherLoop } from './watchers.mjs';
 import { openWindow } from './window.mjs';
 
@@ -192,6 +194,32 @@ const routes = {
   'GET /api/history': async (req, res) => {
     const q = new URL(req.url, 'http://x').searchParams;
     json(res, 200, { items: readHistory(Math.min(500, +q.get('n') || 100), { sinceReset: q.has('current') }) });
+  },
+  // "My things" panel: scheduled items, what Eve remembers about the user, and today's spend.
+  'GET /api/things': (req, res) => {
+    let profile = '';
+    try { profile = fs.readFileSync(path.join(ROOT, 'workspace', 'memory', 'profile.md'), 'utf8'); } catch {}
+    json(res, 200, {
+      reminders: reminders.load().map((r) => ({ id: r.id, text: r.text, due: r.due, repeat: r.repeat })),
+      watchers: watchers.load().map((w) => ({ id: w.id, type: w.type, target: w.target, text: w.text, message: w.message })),
+      profile,
+      spent: spentToday(),
+      cap: brain.budget?.dailyHardUsd || 0,
+    });
+  },
+  'POST /api/reminders/remove': async (req, res) => {
+    const { id } = await readJson(req);
+    json(res, 200, { ok: reminders.remove(Number(id)) });
+  },
+  'POST /api/watchers/remove': async (req, res) => {
+    const { id } = await readJson(req);
+    json(res, 200, { ok: watchers.remove(Number(id)) });
+  },
+  'POST /api/profile': async (req, res) => {
+    const { text } = await readJson(req);
+    if (typeof text !== 'string' || text.length > 20000) return json(res, 400, { error: 'Profile must be text under 20,000 characters.' });
+    fs.writeFileSync(path.join(ROOT, 'workspace', 'memory', 'profile.md'), text);
+    json(res, 200, { ok: true });
   },
   'POST /api/ui-state': async (req, res) => {
     const { state } = await readJson(req);

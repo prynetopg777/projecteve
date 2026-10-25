@@ -380,6 +380,7 @@
         <label>Listening <select id="langSel" title="Language Eve listens for"><option value="fil-PH">Filipino / Taglish</option><option value="en-PH">English (PH)</option><option value="en-US">English (US)</option></select></label>
         <div class="row">Wake word <button id="wakeBtn" aria-pressed="false" title="Listen continuously for the wake word"><span class="tick" aria-hidden="true"></span><span id="wakeLabel">Off</span></button></div>
         <hr>
+        <button id="thingsBtn" class="wide" title="Scheduled reminders and watchers, what Eve remembers, and today's spending">My things</button>
         <button id="histBtn" class="wide" title="Past conversations">History</button>
         <p class="keys">Ctrl+Space talk · Esc stop · / or Ctrl+K type · ↑ last request</p>
         <button id="newBtn" class="wide" title="Clears the transcript. Long-term memory is kept.">Start a new chat</button>
@@ -390,6 +391,10 @@
   <div class="histpanel" id="histPanel" role="dialog" aria-modal="true" aria-label="Conversation history" hidden>
     <div class="histhead"><strong>History</strong><button id="histClose" aria-label="Close history">Close</button></div>
     <div class="histlist" id="histList" tabindex="0"></div>
+  </div>
+  <div class="histpanel" id="thingsPanel" role="dialog" aria-modal="true" aria-label="My things" hidden>
+    <div class="histhead"><strong>My things</strong><button id="thingsClose" aria-label="Close my things">Close</button></div>
+    <div class="histlist" id="thingsList" tabindex="0"></div>
   </div>
   <main>
     <div class="banner" id="banner" role="status" hidden><span>Eve's interface was updated.</span><button id="reloadBtn">Reload</button></div>
@@ -1371,6 +1376,12 @@ $('form').onsubmit = (e) => { e.preventDefault(); send($('input').value); $('inp
 $('hints').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) send(b.textContent); });
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('histPanel').hidden) { closeHistory(); return; }
+  if (e.key === 'Escape' && !$('thingsPanel').hidden) { closeThings(); return; }
+  // Keep Tab inside My things while it's open.
+  if (e.key === 'Tab' && !$('thingsPanel').hidden) {
+    const f = [$('thingsClose'), ...$('thingsList').querySelectorAll('button, textarea')], i = f.indexOf(document.activeElement);
+    e.preventDefault(); f[(i + (e.shiftKey ? f.length - 1 : 1)) % f.length].focus();
+  }
   if (e.key === 'Escape' && !$('settingsPanel').hidden) { closeSettings(); $('settingsBtn').focus(); return; }
   // Keep Tab inside the History dialog while it's open.
   if (e.key === 'Tab' && !$('histPanel').hidden) {
@@ -1467,6 +1478,71 @@ $('histBtn').onclick = async () => {
 };
 function closeHistory() { $('histPanel').hidden = true; $('settingsBtn').focus(); }
 $('histClose').onclick = closeHistory;
+// My things: scheduled reminders and watchers (removable), Eve's profile of you (editable), today's spend.
+function closeThings() { $('thingsPanel').hidden = true; $('settingsBtn').focus(); }
+$('thingsClose').onclick = closeThings;
+$('thingsBtn').onclick = () => { closeSettings(); openThings(); };
+async function openThings() {
+  $('thingsPanel').hidden = false;
+  $('thingsClose').focus();
+  renderThings(null);
+  try { renderThings(await (await fetch('/api/things')).json()); } catch { renderThings('error'); }
+}
+function thingsSection(title) {
+  const sec = document.createElement('section');
+  const h = document.createElement('h3'); h.textContent = title; h.style.cssText = 'font-size:var(--fs-sm);margin:var(--s3) 0 var(--s1)';
+  sec.append(h);
+  return sec;
+}
+function thingsRow(text, onRemove) {
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;justify-content:space-between;gap:var(--s2);align-items:center;padding:var(--s1) 0';
+  const span = document.createElement('span'); span.textContent = text;
+  const btn = document.createElement('button'); btn.textContent = 'Remove'; btn.setAttribute('aria-label', 'Remove: ' + text);
+  btn.onclick = onRemove;
+  row.append(span, btn);
+  return row;
+}
+function renderThings(data) {
+  const list = $('thingsList');
+  list.replaceChildren();
+  if (data === null) { list.textContent = 'Loading…'; return; }
+  if (data === 'error') { list.textContent = "Couldn't load my things. Is Eve's server running?"; return; }
+  // Scheduled
+  const sched = thingsSection('Scheduled');
+  if (!data.reminders.length && !data.watchers.length) sched.append(Object.assign(document.createElement('p'), { textContent: 'Nothing scheduled.' }));
+  for (const r of data.reminders) {
+    const when = new Date(r.due).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) + (r.repeat ? ` (${r.repeat})` : '');
+    sched.append(thingsRow(`Reminder: ${r.text}, ${when}`, async () => {
+      await fetch('/api/reminders/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: r.id }) });
+      openThings();
+    }));
+  }
+  for (const w of data.watchers) {
+    const what = [w.type, w.target, w.text].filter(Boolean).join(' · ');
+    sched.append(thingsRow(`Watcher: ${what}`, async () => {
+      await fetch('/api/watchers/remove', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: w.id }) });
+      openThings();
+    }));
+  }
+  // Memory
+  const mem = thingsSection('What I remember about you');
+  const ta = document.createElement('textarea');
+  ta.value = data.profile; ta.rows = 10; ta.style.cssText = 'width:100%;box-sizing:border-box;font:inherit';
+  ta.setAttribute('aria-label', 'Profile notes, one fact per line');
+  const save = document.createElement('button'); save.textContent = 'Save changes';
+  const status = document.createElement('span'); status.setAttribute('role', 'status'); status.style.marginLeft = 'var(--s2)';
+  save.onclick = async () => {
+    const res = await fetch('/api/profile', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: ta.value }) });
+    status.textContent = res.ok ? 'Saved.' : "Couldn't save.";
+  };
+  mem.append(ta, document.createElement('br'), save, status);
+  // Usage
+  const use = thingsSection("Today's spending");
+  const cap = data.cap ? ` of $${data.cap} daily cap` : '';
+  use.append(Object.assign(document.createElement('p'), { textContent: `$${data.spent.toFixed(2)} spent today${cap}.` }));
+  list.append(sched, mem, use);
+}
 document.addEventListener('click', (e) => {
   if (!$('settingsPanel').hidden && !e.target.closest('#settingsPanel, #settingsBtn')) closeSettings();
 });
