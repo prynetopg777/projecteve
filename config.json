@@ -19,7 +19,7 @@
   "appWindow": true,
   "desktopShortcut": true,
   "claudePath": "",
-  "extraDirs": ["~"],
+  "extraDirs": [],
   "autoAllow": [
     "Read",
     "Glob",

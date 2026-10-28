@@ -130,7 +130,7 @@ src/launcher.mjs supervises the server: restarts and crash rollback
 | `refreshTurns` | Refresh after this many turns in a conversation (default 40) |
 | `overlay` | Show the desktop indicator |
 | `autoAllow` | Tools that never need approval. Keep this to read-only tools. |
-| `extraDirs` | Folders Eve may access besides `workspace/` (default: your home folder) |
+| `extraDirs` | Extra folders Eve may access besides `workspace/` (default: none). Add `"~"` for your home folder, or list specific folders |
 
 The server only accepts requests from `localhost`, and it rejects requests from other websites.
 
